@@ -1,8 +1,8 @@
-from tkinter import Tk
+from tkinter import Tk, Event, Entry
 from menus import SeatMenu
-from frames import NightControlFrame, ExecutionFrame
+from frames import NightControlFrame, ExecutionFrame, SeatFrame
 from components import ToggleAlignmentButton
-from chars import Player
+from chars import Player, Character, teensy_char_list, teensy_token_list
 
 def only_int(value: str):
     return value.isdigit() or value == ""
@@ -10,16 +10,40 @@ def only_int(value: str):
 class QuantumClocktower(Tk):
     INITIAL_WINDOW_SIZE: int = 800
 
-    def __init__(self, *args, **kwargs) -> None:
+    CIRCLE_RADIUS = 250
+    CIRCLE_CENTRE = INITIAL_WINDOW_SIZE / 2
+
+    def __init__(self, players: int, script: int, evils_predetermined: bool, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.geometry(f"{self.INITIAL_WINDOW_SIZE}x{self.INITIAL_WINDOW_SIZE}")
 
         self.int_vcmd = (self.register(only_int), "%P")
 
-        self.players: list[Player] = [Player("Fin", None, [])]
+        self.script_index = script
+        scripts = [[teensy_char_list, teensy_token_list]]
+        self.character_list: list[Character] = scripts[self.script_index][0]
+        
         self.night = 1
-        self.script_index = 1
         self.alignments_shown = False
+
+        if evils_predetermined:
+            evil_players = random.sample(range(players), evil_count)
+        
+        self.seat_names: dict[Seat, Entry] = {}
+        self.players: list[Player] = []
+
+        for i in range(players):
+            if evils_predetermined:
+                if i in evil_players:
+                    self.players.append(Player(None, "evil", self.character_list))
+                else:
+                    self.players.append(Player(None, "good", self.character_list))
+            else:
+                self.players.append(Player(None, None, self.character_list))
+            
+            seat = SeatFrame(self, self.players[-1], i / players, self.CIRCLE_CENTRE, self.CIRCLE_RADIUS)
+            self.seat_names[seat] = seat.seat_name
+        self.seats: list[Seat] = list(self.seat_names.keys())
         
         self.seat_menu = SeatMenu(self)
         self.night_control = NightControlFrame(self)
@@ -76,6 +100,12 @@ class QuantumClocktower(Tk):
         if self.execution.executee != "":
             return True
         return False
+    
+    def night_finished(self) -> None:
+        for seat in self.seat_list:
+            if seat.cget("text") == "":
+                return False
+        return True
 
     def start_night(self) -> None:
         self.night_decisions = []
@@ -83,16 +113,15 @@ class QuantumClocktower(Tk):
             return
         
         if self.night == 1:
-            for i, j in enumerate(self.players):
-                seat, name = j
-                player_list[i].name = name.get()
+            for i, (seat, name) in enumerate(self.seat_names.items()):
+                self.players[i].name = name.get()
                 name.config(state="disabled", takefocus=0)
                 root.focus()
-                seat.player = player_list[i]
-            executee_selector.config(
-                values=[None] + [player.name for player in player_list]
+                seat.player = self.players[i]
+            self.execution.executee_selector.config(
+                values=[None] + [player.name for player in self.players]
             )
-            toggle_alignments_button.config(state="normal")
+            self.alignment_button.config(state="normal")
 
             ...  # process day stuff
 
@@ -108,7 +137,12 @@ class QuantumClocktower(Tk):
         if setToggle == None:
             setToggle = not self.alignments_shown
         self.alignments_shown = setToggle
+    
+    def create_seat_menu(self, event: Event, player: Player) -> None:
+        self.seat_menu.player = player
+        self.seat_menu.post(event.x_root, event.y_root)
 
 
-root = QuantumClocktower()
+
+root = QuantumClocktower(6, 0, False, )
 root.mainloop()

@@ -56,18 +56,6 @@ else:
 
 all_night_decisions: list[list] = []
 
-root = tk.Tk()
-WINDOW_SIZE = 800
-root.geometry(f"{WINDOW_SIZE}x{WINDOW_SIZE}")
-
-
-def create_seat_menu(event: tk.Event):
-    seat_menu.current_seat = event.widget
-    seat_menu.post(event.x_root, event.y_root)
-
-
-NIGHT_PANEL_SIZE = "600x400"
-
 
 def first_night_model(
     player_making_choice: Player = None, chosen_player: Player = None
@@ -257,85 +245,6 @@ def first_night_model(
     return model, variables
 
 
-CIRCLE_CENTRE = WINDOW_SIZE / 2
-CIRCLE_RADIUS = 250
-if evils_predetermined:
-    evil_players = random.sample(range(player_count), evil_count)
-seats_names_list: list[tuple[Seat, tk.Entry]] = []
-player_list: list[Player] = []
-for i in range(player_count):
-    seat_frame = tk.Frame(root)
-    angle = 2 * math.pi / player_count * i
-    x_point = CIRCLE_RADIUS * math.sin(angle)
-    y_point = CIRCLE_RADIUS * math.cos(angle)
-    seat_frame.place(
-        x=CIRCLE_CENTRE + x_point, y=CIRCLE_CENTRE - y_point, anchor="center"
-    )
-    seat = Seat(seat_frame, width=5, height=3)
-    seat.bind("<Button-1>", create_seat_menu)
-    seat.grid(row=0)
-    seat_name = tk.Entry(
-        seat_frame,
-        justify="center",
-        bg="light grey",
-        width=15,
-        disabledforeground="black",
-        disabledbackground="#E0E0E0",
-    )
-    seat_name.grid(row=1)
-    seats_names_list.append((seat, seat_name))
-    if evils_predetermined:
-        if i in evil_players:
-            player_list.append(Player(None, "evil", character_list))
-        else:
-            player_list.append(Player(None, "good", character_list))
-    else:
-        player_list.append(Player(None, None, character_list))
-seat_list: list[Seat] = [i[0] for i in seats_names_list]
-
-
-def day_finished():
-    if night_phase.get() == "Setup":
-        return True
-    if executee_selector.get() != "":
-        return True
-    return False
-
-
-def night_finished():
-    for seat in seat_list:
-        if seat.cget("text") == "":
-            return False
-    return True
-
-
-def start_night():
-    global previous_night_decisions
-    previous_night_decisions = []
-    if not day_finished():
-        return
-    if night_num == 1:
-        for i, j in enumerate(seats_names_list):
-            seat, name = j
-            player_list[i].name = name.get()
-            name.config(state="disabled", takefocus=0)
-            root.focus()
-            seat.player = player_list[i]
-        executee_selector.config(
-            values=[None] + [player.name for player in player_list]
-        )
-        toggle_alignments_button.config(state="normal")
-
-        ...  # process day stuff
-
-    toggle_alignments(alignments_enabled=True)
-    start_night_button.config(state="disabled")
-    end_night_button.config(state="normal")
-    executee_selector.config(state="disabled")
-    night_phase.set("Night")
-    executee_selector.set("")
-
-
 def end_night():
     if not night_finished():
         return
@@ -344,27 +253,6 @@ def end_night():
         if script_index != 0:
             raise NotImplementedError
         model, variables = first_night_model()
-
-        # class SolverCallback(cp_model.CpSolverSolutionCallback):
-        #     def __init__(self, variables):
-        #         super().__init__()
-        #         self._variables = variables
-        #         self._solution_count = 0
-
-        #     worlds = []
-        #     def on_solution_callback(self):
-        #         self._solution_count += 1
-        #         print(f"Solution {self._solution_count}")
-
-        # assigned_char, target, player_learned, tokens, is_evil = self._variables
-        # for i, p in enumerate(player_list):
-        #     for c in range(len(character_list)):
-        #         if self.value(assigned_char[i][c]) == 1:
-        #             assigned_char[i][c]
-        # variables = [v for v in self._variables if self.value(v) == 1]
-        # for p in range(len(player_list)):
-        #     assigned_char_index = [v[] for v in variables]
-        # callback = SolverCallback(variables)
 
         assigned_char, target, player_learned, tokens, is_evil = variables
         possible_char_indexes: list[list] = [[] for _ in player_list]

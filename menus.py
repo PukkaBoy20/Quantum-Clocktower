@@ -1,12 +1,15 @@
-from tkinter import Menu
+from tkinter import Menu, Toplevel, Entry, Listbox, Button
+from tkinter.ttk import Combobox
 
 from frames import NightActionFrame
-from components import SeatButton
+from chars import Player
 
 class SeatMenu(Menu):
-    def __init__(self, master=None, current_seat: SeatButton = None, tearoff = 0, **kwargs):
-        super().__init__(master, **kwargs)
-        self.current_seat = current_seat
+    NIGHT_PANEL_SIZE = "600x400"
+
+    def __init__(self, master=None, player: Player = None, tearoff = 0, **kwargs):
+        super().__init__(master, tearoff=0, **kwargs)
+        self.player = player
 
         self.add_command(
             label = "Create Night Action",
@@ -15,15 +18,25 @@ class SeatMenu(Menu):
         self.add_command(
             label = "View Possible Characters",
             command = lambda: print(
-                f"Possible characters:\n{self.current_seat.player.possible_characters}"
+                f"Possible characters:\n{self.player.possible_characters}"
             ),
         )
 
     def create_night_action(self) -> None:
-        self.night_action_window = tk.Toplevel(self.master)
-        self.night_action_window.title(f"Set Night Action for {seat.player.name}")
-        self.night_action_window.geometry(NIGHT_PANEL_SIZE)
-        self.night_action_frame = NightActionFrame(self.execute_night_action)
+        self.night_action_window = Toplevel(self.master)
+        self.night_action_window.title(f"Set Night Action for {self.player.name}")
+        self.night_action_window.geometry(self.NIGHT_PANEL_SIZE)
+
+        self.night_action_frame = NightActionFrame(self.night_action_window)
+
+        self.night_action_done_button = Button(
+            self.night_action_window,
+            text="Done",
+            command=lambda: self.execute_night_action(
+                *self.night_action_frame.get_action_info()
+            ),
+        )
+        self.night_action_done_button.pack(side="bottom", anchor="e", padx=20, pady=20)
     
     def execute_night_action(self, chosen_player, info_type) -> None:
         if self.master.execute_night_action(self.get_final_info(), chosen_player, info_type):
@@ -34,15 +47,15 @@ class SeatMenu(Menu):
         match self.night_action_frame.specific_info_box:
             case None:
                 final_info = None
-            case tk.Entry() | ttk.Combobox():
-                final_info = specific_info_box.get()
+            case Entry() | Combobox():
+                final_info = self.night_action_frame.specific_info_box.get()
                 if final_info == "":
                     final_info = False
-            case tk.Listbox():
+            case Listbox():
                 final_info = [
-                    specific_info_box.get(i) for i in specific_info_box.curselection()
+                    self.night_action_frame.specific_info_box.get(i) for i in self.night_action_frame.specific_info_box.curselection()
                 ]
-                if len(final_info) != 3 or len(player_list) < 7:
+                if len(final_info) != 3 or len(self.master.player_list) < 7:
                     final_info = False
         return final_info
 
