@@ -2,10 +2,17 @@ from ortools.sat.python import cp_model
 
 
 class Player:
-    def __init__(self, name, alignment, character_list):
-        self.name = name
+    def __init__(
+        self,
+        name: str | None,
+        alignment: str | None,
+        index: int,
+        character_list: list["Character"],
+    ):
+        self.name = name if name else ""
         self.alignment = alignment
-        if alignment == None:
+        self.index = index
+        if alignment is None:
             self.possible_characters: list[Character] = character_list
         else:
             self.possible_characters: list[Character] = [
@@ -33,9 +40,7 @@ class Character:
 
 
 class Token:
-    def __init__(
-        self, name: str, droisoning: bool, conditions: tuple[tuple[cp_model.IntVar]]
-    ):
+    def __init__(self, name: str, droisoning: bool, conditions: tuple[cp_model.IntVar]):
         self.name = name
         self.droisoning = droisoning
         self.conditions = (
