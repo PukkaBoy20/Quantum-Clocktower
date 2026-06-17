@@ -14,13 +14,6 @@ from chars import (
 )
 
 
-class Seat(tk.Button):
-    def __init__(self, master=None, player: Player = None, **kwargs):
-        kwargs.setdefault("takefocus", 0)
-        super().__init__(master, **kwargs)
-        self.player = player
-
-
 class SeatMenu(tk.Menu):
     def __init__(self, master=None, current_seat: Seat = None, **kwargs):
         super().__init__(master, **kwargs)
@@ -68,152 +61,12 @@ WINDOW_SIZE = 800
 root.geometry(f"{WINDOW_SIZE}x{WINDOW_SIZE}")
 
 
-def get_player(name: str):
-    for player in player_list:
-        if player.name == name:
-            return player
-    raise RuntimeWarning
-
-
 def create_seat_menu(event: tk.Event):
     seat_menu.current_seat = event.widget
     seat_menu.post(event.x_root, event.y_root)
 
 
 NIGHT_PANEL_SIZE = "600x400"
-specific_info_box: ttk.Combobox | tk.Entry | tk.Listbox = None
-
-
-def only_int(value: str):
-    return value.isdigit() or value == ""
-
-
-int_vcmd = (root.register(only_int), "%P")
-
-
-def create_night_action(seat: Seat):
-    global specific_info_box
-    night_action_panel = tk.Toplevel(root)
-    night_action_panel.title(f"Set Night Action for {seat.player.name}")
-    night_action_panel.geometry(NIGHT_PANEL_SIZE)
-    night_action_frame = tk.Frame(night_action_panel)
-    night_action_frame.pack(anchor="w", padx=30, pady=15)
-    chosen_player_label = tk.Label(night_action_frame, text="Chosen Player")
-    chosen_player_label.grid(row=0)
-    chosen_player_box = ttk.Combobox(
-        night_action_frame,
-        state="readonly",
-        values=[None] + [p.name for p in player_list],
-    )
-    chosen_player_box.grid(row=1)
-    info_type_label = tk.Label(night_action_frame, text="Info Learned")
-    info_type_label.grid(row=2)
-    info_type = ttk.Combobox(
-        night_action_frame,
-        state="readonly",
-        values=[None, "Number", "One Character", "Three Characters"],
-    )
-    info_type.grid(row=3, sticky="n")
-    info_type.bind(
-        "<<ComboboxSelected>>",
-        lambda event: show_specific_info_box(event.widget.get(), night_action_frame),
-    )
-    specific_info_box = None
-    night_action_done_button = tk.Button(
-        night_action_panel,
-        text="Done",
-        command=lambda: finish_night_action(
-            seat.player, chosen_player_box.get(), info_type.get(), night_action_panel
-        ),
-    )
-    night_action_done_button.pack(side="bottom", anchor="e", padx=20, pady=20)
-
-
-def show_specific_info_box(info_type: str, night_action_frame: tk.Frame):
-    global specific_info_box
-    if specific_info_box != None:
-        specific_info_box.destroy()
-    match info_type:
-        case "None":
-            specific_info_box = None
-        case "Number":
-            specific_info_box = tk.Entry(
-                night_action_frame, validate="key", vcmd=int_vcmd
-            )
-            specific_info_box.grid(row=3, column=1)
-        case "One Character":
-            specific_info_box = ttk.Combobox(
-                night_action_frame,
-                state="readonly",
-                values=[c.name for c in character_list],
-            )
-            specific_info_box.grid(row=3, column=1)
-        case "Three Characters":
-            specific_info_box = tk.Listbox(
-                night_action_frame,
-                selectmode="multiple",
-                listvariable=tk.StringVar(value=[c.name for c in character_list]),
-            )
-            specific_info_box.grid(row=3, column=1)
-
-
-def finish_night_action(
-    self_player: Player,
-    chosen_player_name: str,
-    info_type,
-    night_action_panel: tk.Toplevel,
-):
-    if "" in (chosen_player_name, info_type):
-        return
-    final_info = calc_final_info()
-    if final_info == False:
-        return
-    if isinstance(final_info, int):  # currently unused
-        number_learned = final_info
-    else:
-        number_learned = False
-    if chosen_player_name == "None":
-        chosen_player = None
-    else:
-        chosen_player = get_player(chosen_player_name)
-
-    if night_num == 1:
-        if script_index != 0:
-            raise NotImplementedError
-        if number_learned is not False:
-            return
-        model, _ = first_night_model(self_player, chosen_player)
-        solver = cp_model.CpSolver()
-        # solver.parameters.log_search_progress = True
-        if solver.solve(model) in (cp_model.FEASIBLE, cp_model.OPTIMAL):
-            previous_night_decisions.append(
-                (self_player, number_learned, chosen_player)
-            )
-        else:
-            print("invalid choice")
-            return
-
-    ...  # update worlds# update worlds
-
-    seat_menu.current_seat.config(text=f"Chose: {chosen_player}\nInfo: {final_info}")
-    night_action_panel.destroy()
-
-
-def calc_final_info():
-    match specific_info_box:
-        case None:
-            final_info = None
-        case tk.Entry() | ttk.Combobox():
-            final_info = specific_info_box.get()
-            if final_info == "":
-                final_info = False
-        case tk.Listbox():
-            final_info = [
-                specific_info_box.get(i) for i in specific_info_box.curselection()
-            ]
-            if len(final_info) != 3 or len(player_list) < 7:
-                final_info = False
-    return final_info
 
 
 def first_night_model(
@@ -404,19 +257,6 @@ def first_night_model(
     return model, variables
 
 
-seat_menu = SeatMenu(root, tearoff=0)
-seat_menu.add_command(
-    label="Create Night Action",
-    command=lambda: create_night_action(seat_menu.current_seat),
-)
-seat_menu.add_command(
-    label="View Possible Characters",
-    command=lambda: print(
-        f"Possible characters:\n{seat_menu.current_seat.player.possible_characters}"
-    ),
-)
-
-
 CIRCLE_CENTRE = WINDOW_SIZE / 2
 CIRCLE_RADIUS = 250
 if evils_predetermined:
@@ -590,20 +430,6 @@ def variable_is_possible(variable):
     return bool(solver.solve(test_model) in (cp_model.OPTIMAL, cp_model.FEASIBLE))
 
 
-night_control_frame = tk.Frame(root)
-night_control_frame.pack(anchor="ne")
-start_night_button = tk.Button(
-    night_control_frame, text="Start Night", command=start_night
-)
-start_night_button.grid(row=0)
-end_night_button = tk.Button(
-    night_control_frame, text="End Night", command=end_night, state="disabled"
-)
-end_night_button.grid(row=1)
-night_phase = tk.StringVar(value="Setup")
-night_phase_label = tk.Label(night_control_frame, textvariable=night_phase)
-night_phase_label.grid(row=2)
-
 
 def toggle_alignments(alignments_enabled="change"):
     if alignments_enabled == "change":
@@ -626,20 +452,3 @@ def toggle_alignments(alignments_enabled="change"):
     elif not alignments_enabled:
         for seat in seat_list:
             seat.config(highlightbackground="systemWindowBackgroundColor")
-
-
-toggle_alignments_button = tk.Button(
-    root, text="Toggle Alignments", command=toggle_alignments, state="disabled"
-)
-toggle_alignments_button.place(anchor="nw")
-
-
-execution_frame = tk.Frame(root)
-execution_frame.pack(side="right", anchor="n", padx=15, pady=15)
-execution_label = tk.Label(execution_frame, text="Player Executed")
-execution_label.grid(row=0)
-executee_selector = ttk.Combobox(execution_frame, state="disabled")
-executee_selector.grid(row=1)
-
-
-root.mainloop()
