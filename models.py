@@ -79,17 +79,17 @@ def create_model(
                     if c.can_target(n)
                 )
             )
-            p_learns_player = model.new_bool_var(f"{n}_{p}_learns_player")
+            p_learns_character = model.new_bool_var(f"{n}_{p}_learns_character")
             model.add(
-                p_learns_player
+                p_learns_character
                 == sum(
                     assigned_char[n][p][j]
                     for j, c in enumerate(clocktower.character_list)
-                    if c.learns_player
+                    if c.learns_character(n)
                 )
             )
             model.add(sum(target[n][p]) == p_can_target)
-            model.add(sum(player_learned[n][p]) == p_learns_player)
+            model.add(sum(player_learned[n][p]) == p_learns_character)
 
         #TODO: uncomment when tokens are finished
         # tokens

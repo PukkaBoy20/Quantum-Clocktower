@@ -28,13 +28,13 @@ class Character:
         alignment: str,
         character_type: str,
         can_target,
-        learns_player: bool,
+        learns_character: bool,
     ):
         self.name = name
         self.alignment = alignment
         self.character_type = character_type
         self.can_target = can_target
-        self.learns_player = learns_player
+        self.learns_character = learns_character
 
 
 class Token:
@@ -58,7 +58,7 @@ def retain_token(
     tokens: list[list[list[cp_model.IntVar]]],
     n: int,
     token_index: int,
-    only_if: cp_model.IntVar = None
+    only_if: cp_model.IntVar | None = None
 ):
     if n == 0:
         return
@@ -70,25 +70,48 @@ def retain_token(
             model.add(tokens[n][p][token_index] == tokens[n-1][p][token_index]).only_enforce_if(only_if)
 
 
-full_sized_char_list = [
-    Character("clockmaker", "good", "townsfolk", lambda _: False, False),
-    Character("pixie", "good", "townsfolk", lambda _: False, False)
+full_sized_char_list = [ # TODO: add learns_number/group of characters. or just remake this whole thing. use **kwargs instead?
+    Character("clockmaker", "good", "townsfolk", lambda _: False, lambda _: False),
+    Character("pixie", "good", "townsfolk", lambda _: False, lambda n: n == 0),
+    Character("empath", "good", "townsfolk", lambda _: False, lambda _: False),
+    Character("mathematician", "good", "townsfolk", lambda _: False, lambda _: False),
+    Character("undertaker", "good", "townsfolk", lambda _: False, ...),
+    Character("gambler", "good", "townsfolk", lambda n: (n > 1 and not n % 2), lambda _: False),
+    Character("monk", "good", "townsfolk",),
+    Character("lycanthrope", "good", "townsfolk",),
+    Character("NOT GOSSIP!!!!!!!", "good", "townsfolk",),
+    Character("fool", "good", "townsfolk",),
+    Character("tea lady", "good", "townsfolk",),
+    Character("cannibal", "good", "townsfolk",),
+    Character("mayor", "good", "townsfolk",),
+    Character("NOT ATHEIST!!! probably", "good", "townsfolk",),
+    Character("puzzlemaster", "good", "outsider",),
+    Character("damsel", "good", "outsider",),
+    Character("drunk", "good", "outsider",),
+    Character("barber", "good", "outsider",),
+    Character("poisoner", "evil", "minion",),
+    Character("devil's advocate", "evil", "minion",),
+    Character("baron", "evil", "minion",),
+    Character("mastermind", "evil", "minion",),
+    Character("pukka", "evil", "demon",),
+    Character("lleech", "evil", "demon",),
+    Character("vortox", "evil", "demon",),
 ]
 
 teensy_char_list = [
-    Character("balloonist", "good", "townsfolk", lambda _: True, False),
-    Character("lycanthrope", "good", "townsfolk", lambda night: True if night > 1 else False, False),
-    Character("preacher", "good", "townsfolk", lambda _: True, False),
-    Character("princess", "good", "townsfolk", lambda _: False, False),
-    Character("monk", "good", "townsfolk", lambda night: True if night > 1 else False, False),
-    Character("alchemist_poisoner", "good", "townsfolk", lambda _: True, False),
-    Character("alchemist_goblin", "good", "townsfolk", lambda _: False, False),
-    Character("goon", "good", "outsider", lambda _: False, False),
-    Character("klutz", "good", "outsider", lambda _: False, False),
-    Character("poisoner", "evil", "minion", lambda _: True, False),
-    Character("goblin", "evil", "minion", lambda _: False, False),
-    Character("pukka", "evil", "demon", lambda _: True, False),
-    Character("imp", "evil", "demon", lambda night: True if night > 1 else False, False),
+    Character("balloonist", "good", "townsfolk", lambda _: True, lambda _: False),
+    Character("lycanthrope", "good", "townsfolk", lambda n: (n > 1 and not n % 2), lambda _: False),
+    Character("preacher", "good", "townsfolk", lambda _: True, lambda _: False),
+    Character("princess", "good", "townsfolk", lambda _: False, lambda _: False),
+    Character("monk", "good", "townsfolk", lambda n: (n > 1 and not n % 2), lambda _: False),
+    Character("alchemist_poisoner", "good", "townsfolk", lambda _: True, lambda _: False),
+    Character("alchemist_goblin", "good", "townsfolk", lambda _: False, lambda _: False),
+    Character("goon", "good", "outsider", lambda _: False, lambda _: False),
+    Character("klutz", "good", "outsider", lambda _: False, lambda _: False),
+    Character("poisoner", "evil", "minion", lambda _: True, lambda _: False),
+    Character("goblin", "evil", "minion", lambda _: False, lambda _: False),
+    Character("pukka", "evil", "demon", lambda _: True, lambda _: False),
+    Character("imp", "evil", "demon", lambda n: (n > 1 and not n % 2), lambda _: False),
 ]
 teensy_night_order = [8, 4, 0, 5, 3, 2, 999, 999, 999, 1, 999, 7, 6]
 teensy_char_list = [
@@ -600,6 +623,8 @@ def add_dead_token_condition(
         )
 
 
+full_sized_token_list = []
+
 teensy_token_list = [
     Token("balloonist_known", False, add_balloonist_known_token_condition),
     Token("lycanthrope_killed", False, add_lycanthrope_killed_token_first_night_condition),
@@ -627,9 +652,9 @@ scripts = {
         teensy_char_list,
         teensy_token_list
     ],
-    "Full sized": [
-        ...,
-        ...
+    "Uncertainty Principle (modified)": [
+        full_sized_char_list,
+        full_sized_token_list
     ]
 }
 
