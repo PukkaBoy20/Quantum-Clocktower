@@ -27,24 +27,22 @@ class Character:
         name: str,
         alignment: str,
         character_type: str,
-        can_target_night_1: bool,
-        can_target_other_nights: bool,
+        can_target,
         learns_player: bool,
     ):
         self.name = name
         self.alignment = alignment
         self.character_type = character_type
-        self.can_target_night_1 = can_target_night_1
-        self.can_target_other_nights = can_target_other_nights
+        self.can_target = can_target
         self.learns_player = learns_player
 
 
 class Token:
-    def __init__(self, name: str, droisoning: bool, conditions: tuple[cp_model.IntVar]):
+    def __init__(self, name: str, droisoning: bool, conditions: tuple):
         self.name = name
         self.droisoning = droisoning
         self.conditions = (
-            conditions  # first night / other nights / daytime / execution???
+            conditions  # first night / other nights / daytime ?
         )
 
 
@@ -54,82 +52,150 @@ def get_character(name: str, character_list: list[Character]):
             return character
     raise RuntimeWarning
 
+def retain_token(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    token_index: int,
+    only_if: cp_model.IntVar = None
+):
+    if n == 0:
+        return
+    if only_if is None:
+        for p in range(len(player_list)):
+            model.add(tokens[n][p][token_index] == tokens[n-1][p][token_index])
+    else:
+        for p in range(len(player_list)):
+            model.add(tokens[n][p][token_index] == tokens[n-1][p][token_index]).only_enforce_if(only_if)
 
-# backup list "clockmaker", "pixie", "empath", "mathematician", "undertaker", "gambler", "monk", "lycanthrope", "gossip", "fool", "tea lady", "cannibal", "mayor", "atheist", "puzzlemaster", "damsel", "drunk", "barber", "poisoner", "devil's advocate", "baron", "mastermind", "pukka", "lleech", "vortox"
-# char_list = [
-#     Character("clockmaker", "good", "townsfolk", rnm_clockmaker),
-#     Character("pixie", "good", "townsfolk", rnm_pixie),
-#     Character("empath", "good", "townsfolk", rnm_empath),
-#     Character("mathematician", "good", "townsfolk", rnm_mathematician),
-#     Character("undertaker", "good", "townsfolk", rnm_undertaker),
-#     Character("gambler", "good", "townsfolk", rnm_undertaker),
-#     Character("monk", "good", "townsfolk", rnm_monk),
-#     Character("lycanthrope", "good", "townsfolk", rnm_lycanthrope),
-#     Character("gossip", "good", "townsfolk", rnm_gossip),
-#     Character("fool", "good", "townsfolk", rnm_fool),
-#     Character("tea lady", "good", "townsfolk", rnm_tea_lady),
-#     Character("cannibal", "good", "townsfolk", rnm_cannibal),
-#     Character("mayor", "good", "townsfolk", rnm_mayor),
-#     Character("atheist", "good", "townsfolk", rnm_atheist),
-#     Character("puzzlemaster", "good", "outsider", rnm_puzzlemaster),
-#     Character("damsel", "good", "outsider", rnm_damsel),
-#     Character("drunk", "good", "outsider", rnm_drunk),
-#     Character("barber", "good", "outsider", rnm_barber),
-#     Character("poisoner", "evil", "minion", rnm_poisoner),
-#     Character("devil's advocate", "minion", "evil", rnm_devils_advocate),
-#     Character("baron", "evil", "minion", rnm_baron),
-#     Character("mastermind", "evil", "minion", rnm_mastermind),
-#     Character("pukka", "evil", "demon", rnm_pukka),
-#     Character("lleech", "evil", "demon", rnm_lleech),
-#     Character("vortox", "evil", "demon", rnm_vortox)
-# ]
+
+full_sized_char_list = [
+    Character("clockmaker", "good", "townsfolk", lambda _: False, False),
+    Character("pixie", "good", "townsfolk", lambda _: False, False)
+]
 
 teensy_char_list = [
-    Character("balloonist", "good", "townsfolk", True, True, True),
-    Character("lycanthrope", "good", "townsfolk", False, True, False),
-    Character("preacher", "good", "townsfolk", True, True, False),
-    Character("princess", "good", "townsfolk", False, False, False),
-    Character("monk", "good", "townsfolk", False, True, False),
-    Character("alchemist_poisoner", "good", "townsfolk", True, True, False),
-    Character("alchemist_goblin", "good", "townsfolk", False, False, False),
-    Character("goon", "good", "outsider", False, False, False),
-    Character("klutz", "good", "outsider", False, False, True),
-    Character("poisoner", "evil", "minion", True, True, False),
-    Character("goblin", "evil", "minion", False, False, True),
-    Character("pukka", "evil", "demon", True, True, False),
-    Character("imp", "evil", "demon", False, True, False),
+    Character("balloonist", "good", "townsfolk", lambda _: True, False),
+    Character("lycanthrope", "good", "townsfolk", lambda night: True if night > 1 else False, False),
+    Character("preacher", "good", "townsfolk", lambda _: True, False),
+    Character("princess", "good", "townsfolk", lambda _: False, False),
+    Character("monk", "good", "townsfolk", lambda night: True if night > 1 else False, False),
+    Character("alchemist_poisoner", "good", "townsfolk", lambda _: True, False),
+    Character("alchemist_goblin", "good", "townsfolk", lambda _: False, False),
+    Character("goon", "good", "outsider", lambda _: False, False),
+    Character("klutz", "good", "outsider", lambda _: False, False),
+    Character("poisoner", "evil", "minion", lambda _: True, False),
+    Character("goblin", "evil", "minion", lambda _: False, False),
+    Character("pukka", "evil", "demon", lambda _: True, False),
+    Character("imp", "evil", "demon", lambda night: True if night > 1 else False, False),
 ]
-teensy_night_order = [9, 5, 1, 6, 4, 3, 999, 0, 999, 2, 999, 8, 7]
+teensy_night_order = [8, 4, 0, 5, 3, 2, 999, 999, 999, 1, 999, 7, 6]
 teensy_char_list = [
     x[0] for x in sorted(zip(teensy_char_list, teensy_night_order), key=lambda x: x[1])
 ]
 
 
-def add_balloonist_known_token_first_night_condition(
+def add_balloonist_known_token_condition(
     model: cp_model.CpModel,
     player_list: list[Player],
     token_list: list[Token],
-    tokens: list[list[cp_model.IntVar]],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
     **kwargs,
 ):
     character_list: list[Character] = kwargs["character_list"]
-    assigned_char: list[list[cp_model.IntVar]] = kwargs["assigned_char"]
-    target: list[list[cp_model.IntVar]] = kwargs["target"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
+    target: list[list[list[cp_model.IntVar]]] = kwargs["target"]
     character_index = [c.name for c in character_list].index("balloonist")
     token_index = [t.name for t in token_list].index("balloonist_known")
-
+    
+    if n % 2:
+        retain_token(model, player_list, tokens, n, token_index) # Purely visual in this case
+        return
+    
     for p in range(len(player_list)):
-        causes: list[cp_model.IntVar] = []
+        balloonists_chose_p: list[cp_model.IntVar] = []
         for q in range(len(player_list)):
-            cause = model.new_bool_var(f"balloonist_known_first_night_{p}_{q}_cause")
-            model.add_bool_and(
-                assigned_char[q][character_index], target[q][p]
-            ).only_enforce_if(cause)
-            model.add_bool_or(
-                [assigned_char[q][character_index].Not(), target[q][p].Not(), cause]
+            q_balloonist_chose_p = model.new_bool_var(f"{q}_balloonist_chose_{p}_{n}")
+            model.add_min_equality(
+                q_balloonist_chose_p,
+                [
+                    assigned_char[n][q][character_index],
+                    target[n][q][p]
+                ]
             )
-            causes.append(cause)
-        model.add_max_equality(tokens[p][token_index], causes)
+            balloonists_chose_p.append(q_balloonist_chose_p)
+        model.add(tokens[n][p][token_index] == sum(balloonists_chose_p))
+    
+    if n == 0:
+        return
+    token_exists = model.new_bool_var("balloonist_token_exists")
+    assigned_char_list_of_previous_known = []
+    for c in range(len(character_list)):
+        char = model.new_bool_var(f"{p}_balloonist_known_char")
+        for p in range(len(player_list)):
+            model.add(char == assigned_char[n-2][p][c]).only_enforce_if(tokens[n-2][p][token_index])
+        model.add(char == 0).only_enforce_if(token_exists.Not())
+        assigned_char_list_of_previous_known.append(char)
+    assigned_char_list_of_previous_known = []    
+    
+    droisoning_token_indexes = [i for i, t in enumerate(token_list) if t.droisoning]
+    model.add_max_equality(
+        token_exists,
+        [tokens[n][p][token_index] for p in range(len(player_list))]
+    )
+    for p in range(len(player_list)):
+        p_is_droisoned = model.new_bool_var(f"balloonist_known_{p}_is_droisoned_{n}")
+        model.add_max_equality(
+            p_is_droisoned,
+            [tokens[n][p][t] for t in droisoning_token_indexes]
+        )
+
+        p_chose_same_char_type = model.new_bool_var(f"{p}_chose_same_char_type_{n}")
+        townsfolk_indexes = [
+            j for j, c in enumerate(character_list)
+            if c.character_type == "townsfolk"
+        ]
+        outsider_indexes = [
+            j for j, c in enumerate(character_list)
+            if c.character_type == "outsider"
+        ]
+        minion_indexes = [
+            j for j, c in enumerate(character_list)
+            if c.character_type == "minion"
+        ]
+        demon_indexes = [
+            j for j, c in enumerate(character_list)
+            if c.character_type == "demon"
+        ]
+        char_type_index_groups = [
+            townsfolk_indexes,
+            outsider_indexes,
+            minion_indexes,
+            demon_indexes
+        ]
+        matches = []
+        for char_type_indexes in char_type_index_groups:
+            for i in char_type_indexes:
+                for j in char_type_indexes:
+                    for q in range(len(player_list)):
+                        m = model.new_bool_var(f"{i}_{j}_{q}_character_type_match_{n}")
+                        model.add_min_equality(
+                            m,
+                            [
+                                target[n][p][q],
+                                assigned_char[n][q][i],
+                                assigned_char_list_of_previous_known[j]
+                            ]
+                        )
+                        matches.append(m)
+        model.add_max_equality(p_chose_same_char_type, matches)
+        
+        model.add_implication(
+            assigned_char[n][p][character_index],
+            p_chose_same_char_type.Not()
+        ).only_enforce_if(p_is_droisoned.Not())
 
 
 def add_lycanthrope_killed_token_first_night_condition(
@@ -152,7 +218,7 @@ def add_lycanthrope_evil_token_first_night_condition(
     **kwargs,
 ):
     character_list: list[Character] = kwargs["character_list"]
-    assigned_char: list[list[cp_model.IntVar]] = kwargs["assigned_char"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
     is_evil: list[cp_model.IntVar] = kwargs["is_evil"]
     token_index = [t.name for t in token_list].index("lycanthrope_evil")
     lycanthrope_index = character_list.index(
@@ -178,7 +244,7 @@ def add_preached_token_first_night_condition(
     **kwargs,
 ):
     character_list: list[Character] = kwargs["character_list"]
-    assigned_char: list[list[cp_model.IntVar]] = kwargs["assigned_char"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
     target: list[list[cp_model.IntVar]] = kwargs["target"]
     character_index = [c.name for c in character_list].index("preacher")
     token_index = [t.name for t in token_list].index("preached")
@@ -242,7 +308,7 @@ def add_alchemist_poisoned_token_night_condition(
     **kwargs,
 ):
     character_list: list[Character] = kwargs["character_list"]
-    assigned_char: list[list[cp_model.IntVar]] = kwargs["assigned_char"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
     target: list[list[cp_model.IntVar]] = kwargs["target"]
     character_index = [c.name for c in character_list].index("alchemist_poisoner")
     token_index = [t.name for t in token_list].index("alchemist_poisoned")
@@ -277,46 +343,50 @@ def add_goon_drunk_and_evil_token_conditions(
     model: cp_model.CpModel,
     player_list: list[Player],
     token_list: list[Token],
-    tokens: list[list[cp_model.IntVar]],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
     **kwargs,
 ):
     character_list: list[Character] = kwargs["character_list"]
-    assigned_char: list[list[cp_model.IntVar]] = kwargs["assigned_char"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
     target: list[list[cp_model.IntVar]] = kwargs["target"]
-    is_evil: list[cp_model.IntVar] = kwargs["is_evil"]
+    is_evil: list[list[cp_model.IntVar]] = kwargs["is_evil"]
     character_index = [c.name for c in character_list].index("goon")
     token_index = [t.name for t in token_list].index("goon_drunk")
     goon_evil_token_index = [t.name for t in token_list].index("goon_evil")
-
+    
+    if n % 2:
+        retain_token(model, player_list, tokens, n, goon_evil_token_index)
+        return
+    
     chose_goon: list[cp_model.IntVar] = []
     for p in range(len(player_list)):
-        chose_goon.append(model.new_bool_var(f"{p}_chose_goon"))
-        causes: list[cp_model.IntVar] = []
+        p_chose_goon = model.new_bool_var(f"{p}_chose_goon")
+        causes = []
         for q in range(len(player_list)):
-            cause = model.new_bool_var((f"chose_goon_{p}_{q}_cause"))
-            model.add_bool_and(
-                assigned_char[q][character_index], target[p][q]
-            ).only_enforce_if(cause)
-            model.add_bool_or(
-                [assigned_char[q][character_index].Not(), target[p][q].Not(), cause]
+            p_chose_q_goon = model.new_bool_var(f"{p}_chose_{q}_goon")
+            model.add_min_equality(
+                p_chose_q_goon,
+                [assigned_char[n][q][character_index], target[n][p][q]]
             )
-            causes.append(cause)
-        model.add(chose_goon[p] == sum(causes))
+            causes.append(p_chose_q_goon)
+        model.add_max_equality(p_chose_goon, causes)
+        chose_goon.append(p_chose_goon)
 
     assigned_char_night_order_index = []
     for p in range(len(player_list)):
         night_index = model.new_int_var(0, len(character_list) - 1, f"{p}_char_index")
-        model.add(
-            night_index
-            == sum(i * assigned_char[p][i] for i in range(len(character_list)))
+        model.add_max_equality(
+            night_index,
+            [i * assigned_char[n][p][i] for i in range(len(character_list))]
         )
         assigned_char_night_order_index.append(night_index)
 
-    goon_drunk_player = model.new_int_var(-1, len(player_list) - 1, "goon_drunk_player")
+    someone_chose_goon = model.new_bool_var("someone_chose_goon")
+    model.add_max_equality(someone_chose_goon, chose_goon)
+    model.add(sum(tokens[n][p][token_index] for p in range(len(player_list))) == someone_chose_goon)
     for p in range(len(player_list)):
-        model.add(goon_drunk_player == p).only_enforce_if(tokens[p][token_index])
-        model.add(goon_drunk_player != p).only_enforce_if(tokens[p][token_index].Not())
-        model.add(chose_goon[p] == 1).only_enforce_if(tokens[p][token_index])
+        model.add(tokens[n][p][token_index] <= chose_goon[p])
         for q in range(len(player_list)):
             if p != q:
                 p_acts_after_q = model.new_bool_var(
@@ -330,41 +400,47 @@ def add_goon_drunk_and_evil_token_conditions(
                     assigned_char_night_order_index[q]
                     > assigned_char_night_order_index[p]
                 ).only_enforce_if(p_acts_after_q.Not())
-                model.add(tokens[p][token_index] + chose_goon[q] <= 1).only_enforce_if(
+                model.add(tokens[n][p][token_index] + chose_goon[q] <= 1).only_enforce_if(
                     p_acts_after_q
                 )
+    
 
     # goon alignment change
-    lycanthrope_evil_token_index = [t.name for t in token_list].index(
-        "lycanthrope_evil"
-    )
+    lycanthrope_evil_token_index = [t.name for t in token_list].index("lycanthrope_evil")
+
     for p in range(len(player_list)):
+        set_p_alignment = []
         for q in range(len(player_list)):
             q_registers_as_evil = model.new_bool_var(f"{q}_registers_as_evil")
-            model.add_bool_or(
-                is_evil[q], tokens[q][lycanthrope_evil_token_index]
-            ).only_enforce_if(q_registers_as_evil)
-            model.add_bool_and(
-                is_evil[q].Not(), tokens[q][lycanthrope_evil_token_index].Not()
-            ).only_enforce_if(q_registers_as_evil.Not())
-
-            p_is_evil_goon = model.new_bool_var(f"{p}_is_evil_goon")
-            model.add_bool_and(
+            model.add_max_equality(
+                q_registers_as_evil,
                 [
-                    assigned_char[p][character_index],
-                    tokens[q][token_index],
-                    q_registers_as_evil,
+                    is_evil[n][q],
+                    tokens[n][q][lycanthrope_evil_token_index]
                 ]
-            ).only_enforce_if(p_is_evil_goon)
-            model.add_implication(p_is_evil_goon, assigned_char[p][character_index])
-            model.add_implication(p_is_evil_goon, tokens[q][token_index])
-            model.add_implication(p_is_evil_goon, q_registers_as_evil)
-            model.add(tokens[p][goon_evil_token_index] == 1).only_enforce_if(
-                p_is_evil_goon
             )
-            model.add(tokens[p][goon_evil_token_index] == 0).only_enforce_if(
-                p_is_evil_goon.Not()
+
+            q_set_p_alignment = model.new_bool_var(f"{q}_set_{p}_goon_alignment")
+            set_p_alignment.append(q_set_p_alignment)
+            model.add_min_equality(
+                q_set_p_alignment,
+                [
+                    assigned_char[n][p][character_index],
+                    tokens[n][q][token_index]
+                ]
             )
+
+            model.add(
+                tokens[n][p][goon_evil_token_index]
+                == q_registers_as_evil
+            ).only_enforce_if(q_set_p_alignment)
+
+        p_alignment_was_set = model.new_bool_var(f"{p}_goon_alignment_was_set")
+        model.add_max_equality(
+            p_alignment_was_set,
+            set_p_alignment
+        )
+        retain_token(model, player_list, tokens, n, goon_evil_token_index, p_alignment_was_set.Not())
 
 
 def add_klutz_picked_token_night_condition(
@@ -374,7 +450,7 @@ def add_klutz_picked_token_night_condition(
     tokens: list[list[cp_model.IntVar]],
     **kwargs,
 ):
-    token_index = [t.name for t in token_list].index("klutz_picked")
+    token_index = [t.name for t in token_list].index("klutz_picked_evil")
     for p in range(len(player_list)):
         model.add(tokens[p][token_index] == 0)
 
@@ -387,7 +463,7 @@ def add_poisoned_token_night_condition(
     **kwargs,
 ):
     character_list: list[Character] = kwargs["character_list"]
-    assigned_char: list[list[cp_model.IntVar]] = kwargs["assigned_char"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
     target: list[list[cp_model.IntVar]] = kwargs["target"]
     character_index = [c.name for c in character_list].index("poisoner")
     token_index = [t.name for t in token_list].index("poisoned")
@@ -426,7 +502,7 @@ def add_pukka_poisoned_token_night_condition(
     **kwargs,
 ):
     character_list: list[Character] = kwargs["character_list"]
-    assigned_char: list[list[cp_model.IntVar]] = kwargs["assigned_char"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
     target: list[list[cp_model.IntVar]] = kwargs["target"]
     character_index = [c.name for c in character_list].index("pukka")
     token_index = [t.name for t in token_list].index("pukka_poisoned")
@@ -481,67 +557,88 @@ def add_starpassed_token_first_night_condition(
         model.add(tokens[p][token_index] == 0)
 
 
+def add_executed_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[cp_model.IntVar]],
+    n: int,
+    **kwargs
+):
+    ...
+
+
+def add_dead_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[cp_model.IntVar]],
+    n: int,
+    **kwargs
+):
+    executed_index = kwargs["executed_index"]
+    token_index = [t.name for t in token_list].index("dead")
+    killing_token_indexes = [
+        i for i, t in enumerate(token_list)
+        if t.name in killing_token_names
+    ]
+    general_protective_token_indexes = [
+        i for i, t in enumerate(token_list)
+        if t.name in protection_token_names
+    ]
+    for p in range(player_list):
+        p_executed_unprotected = model.new_bool_var(f"{p}_executed_unprotected_{n}")
+        p_was_executed = model.new_bool_var()
+        model.add()
+        model.add_max_equality(
+            tokens[n][p][token_index],
+            [p_executed_unprotected] +
+            [
+                tokens[n][p][t]
+                for t in killing_token_indexes
+            ]
+        )
+
+
 teensy_token_list = [
-    Token(
-        "balloonist_known", False, (add_balloonist_known_token_first_night_condition,)
-    ),
-    Token(
-        "lycanthrope_killed",
-        False,
-        (add_lycanthrope_killed_token_first_night_condition,),
-    ),
-    Token(
-        "lycanthrope_evil", False, (add_lycanthrope_evil_token_first_night_condition,)
-    ),
-    Token("preached", True, (add_preached_token_first_night_condition,)),
-    Token("princessed", False, (add_princessed_token_first_night_condition,)),
-    Token("monk_protected", False, (add_monk_protected_token_first_night_condition,)),
-    Token("alchemist_poisoned", True, (add_alchemist_poisoned_token_night_condition,)),
-    Token(
-        "alchemist_gobbled", False, (add_alchemist_gobbled_token_first_night_condition,)
-    ),
-    Token(
-        "goon_drunk",
-        True,
-        (
-            add_goon_drunk_and_evil_token_conditions,
-            add_goon_drunk_and_evil_token_conditions,
-        ),
-    ),
+    Token("balloonist_known", False, add_balloonist_known_token_condition),
+    Token("lycanthrope_killed", False, add_lycanthrope_killed_token_first_night_condition),
+    Token("lycanthrope_evil", False, add_lycanthrope_evil_token_first_night_condition),
+    Token("preached", True, add_preached_token_first_night_condition),
+    Token("princessed", False, add_princessed_token_first_night_condition),
+    Token("monk_protected", False, add_monk_protected_token_first_night_condition),
+    Token("alchemist_poisoned", True, add_alchemist_poisoned_token_night_condition),
+    Token("alchemist_gobbled", False, add_alchemist_gobbled_token_first_night_condition),
+    Token("goon_drunk", True, add_goon_drunk_and_evil_token_conditions),
     Token("goon_evil", False, None),
-    Token(
-        "klutz_picked",
-        False,
-        (
-            add_klutz_picked_token_night_condition,
-            add_klutz_picked_token_night_condition,
-        ),
-    ),
-    Token(
-        "poisoned",
-        True,
-        (
-            add_poisoned_token_night_condition,
-            add_poisoned_token_night_condition,
-        ),
-    ),
-    Token(
-        "gobble_gobble",
-        False,
-        (
-            add_gobble_gobble_token_night_condition,
-            add_gobble_gobble_token_night_condition,
-        ),
-    ),
-    Token(
-        "pukka_poisoned",
-        True,
-        (
-            add_pukka_poisoned_token_night_condition,
-            add_pukka_poisoned_token_night_condition,
-        ),
-    ),
-    Token("pukka_killed", False, (add_pukka_killed_token_first_night_condition,)),
-    Token("imp_killed", False, (add_imp_killed_token_first_night_condition,)),
-    Token("starpassed", False, (add_starpassed_token_first_night_condition,)),
+    Token("klutz_picked_evil", False, add_klutz_picked_token_night_condition),
+    Token("poisoned", True, add_poisoned_token_night_condition),
+    Token("gobble_gobble",False, add_gobble_gobble_token_night_condition),
+    Token("pukka_poisoned",True, add_pukka_poisoned_token_night_condition),
+    Token("pukka_killed", False, add_pukka_killed_token_first_night_condition),
+    Token("imp_killed", False, add_imp_killed_token_first_night_condition),
+    Token("starpassed", False, add_starpassed_token_first_night_condition),
+    Token("executed", False, ...),
+    Token("dead", True, ...)
 ]
+
+scripts = {
+    "Quantum Teensy Tor-ture": [
+        teensy_char_list,
+        teensy_token_list
+    ],
+    "Full sized": [
+        ...,
+        ...
+    ]
+}
+
+killing_token_names = ("executed", "imp_killed", "pukka_killed")
+demon_safe_token_names = ()
+protection_token_names = ()
+execution_survival_tokens = ()
+evil_alignment_token_names = ("goon_evil",)
+initial_extra_demon_token_names = ()
+character_change_token_names = ("starpassed",)
+good_wins_token_names = ()
+evil_wins_token_names = ("klutz_picked_evil",)

@@ -93,7 +93,7 @@ class NightControlFrame(Frame):
         self.end_night_button = Button(
             self,
             text="End Night",
-            command=self.master.end_night,  # type: ignore
+            command=self.master.end_night_or_day,  # type: ignore
             state="disabled",
         )
         self.end_night_button.grid(row=1)

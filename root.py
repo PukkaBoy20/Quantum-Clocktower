@@ -2,9 +2,9 @@ from tkinter import Tk, Event, Entry
 from menus import SeatMenu
 from frames import NightControlFrame, ExecutionFrame, SeatFrame
 from components import ToggleAlignmentButton
-from chars import Player, Character, Token, teensy_char_list, teensy_token_list
+from chars import Player, Character, Token, scripts
 from random import sample
-from models import first_night_model
+from models import create_model
 from util import evil_count, EVIL_COLOUR, GOOD_COLOUR, QUANTUM_COLOUR, DEFAULT_COLOUR
 from ortools.sat.python import cp_model
 
@@ -28,16 +28,14 @@ class QuantumClocktower(Tk):
         self.int_vcmd = (self.register(only_int), "%P")
 
         self.script_index = script
-        scripts = [[teensy_char_list, teensy_token_list]]
-        self.character_list: list[Character] = scripts[self.script_index][0]
-        self.token_list: list[Token] = scripts[self.script_index][1]
+        self.character_list: list[Character] = list(scripts.values())[self.script_index][0]
+        self.token_list: list[Token] = list(scripts.values())[self.script_index][1]
 
         self.night = 1
         self.show_alignments = False
-        self.previous_night_choices = []
-        self.all_night_choices = []
+        self.all_night_choices: list[list] = []
 
-        evil_players = sample(range(player_count), evil_count(player_count))
+        evil_players = sample(range(player_count), evil_count(player_count)) #nosec
 
         self.seat_names: dict[SeatFrame, Entry] = {}
         self.players: list[Player] = []
@@ -70,8 +68,7 @@ class QuantumClocktower(Tk):
         for player in self.players:
             if player.name == player_name:
                 return player
-        else:
-            raise RuntimeWarning
+        raise RuntimeWarning
 
     def execute_night_action(
         self, final_info, chosen_player_name: str, info_type
@@ -91,29 +88,33 @@ class QuantumClocktower(Tk):
         else:
             chosen_player = self.get_player(chosen_player_name)
 
-        if self.night == 1:
-            if self.script_index != 0:
-                raise NotImplementedError
+        if self.script_index != 0: # TODO implement new scripts here
+            raise NotImplementedError
 
-            if number_learned is not False:
-                return False
+        if number_learned is not False:
+            return False
 
-            model, _ = first_night_model(self, self.seat_menu.player, chosen_player)
-            solver = cp_model.CpSolver()
-            # solver.parameters.log_search_progress = True
-            if solver.solve(model) in (cp_model.FEASIBLE, cp_model.OPTIMAL):
-                self.previous_night_choices.append(
-                    (self.seat_menu.player, number_learned, chosen_player)
-                )
-            else:
-                print("invalid choice")
-                return False
-
-        ...  # update worlds# update worlds
-
-        self.seats[
-            self.seat_menu.player.index if self.seat_menu.player else 0
-        ].seat.config(text=f"Chose: {chosen_player}\nInfo: {final_info}")
+        model, variables = create_model(self, self.night, False, self.seat_menu.player, chosen_player)
+        # good_wins, evil_wins, game_over = variables[5:8]
+        solver = cp_model.CpSolver()
+        # solver.parameters.log_search_progress = True
+        if solver.solve(model) in (cp_model.FEASIBLE, cp_model.OPTIMAL):
+            # TODO: make game end partway through night
+            self.all_night_choices[-1][self.players.index(self.seat_menu.player)] = (
+                number_learned, chosen_player
+            )
+        else:
+            print("Invalid Choice")
+            return False
+        
+        if chosen_player is not None:
+            self.seats[
+                self.seat_menu.player.index if self.seat_menu.player else 0
+            ].seat.config(text=f"Chose: {chosen_player.name}\nInfo: {final_info}")
+        else:
+            self.seats[
+                self.seat_menu.player.index if self.seat_menu.player else 0
+            ].seat.config(text=f"Chose: None\nInfo: {final_info}")
         return True
 
     def day_finished(self) -> bool:
@@ -123,16 +124,8 @@ class QuantumClocktower(Tk):
             return True
         return False
 
-    def night_finished(self) -> bool:
-        for seat in self.seat_names:
-            if (
-                seat.seat.cget("text") == ""
-            ):  # Since we set descriptor text after night action
-                return False
-        return True
-
     def start_night(self) -> None:
-        self.previous_night_choices = []
+        self.all_night_choices.append([[] for _ in range(player_count)])
         if not self.day_finished():
             return
 
@@ -153,62 +146,131 @@ class QuantumClocktower(Tk):
         self.execution.set_enabled(False)
         self.night_control.night_phase = "Night"
 
-    def end_night(self) -> None:
-        if not self.night_finished():
+    def end_night_or_day(self) -> None:
+        if min(len(i) for i in self.all_night_choices[-1]) == 0:
             return
+        nighttime = self.night_control.night_phase == "Night"
+        if self.script_index != 0: # TODO: implement new scripts here
+            raise NotImplementedError
+        model, variables = create_model(self, self.night, False)
+        
+        assigned_char, target, player_learned, tokens, is_evil, good_wins, evil_wins, game_over = variables
+        
+        self.determine_possible_variables(model, assigned_char, is_evil)
+        
+        if not self.variable_is_possible(model, game_over[-1].Not()):
+            print("GAME OVER")
+            if nighttime:
+                now = 2*(self.night-1)
+            else:
+                now = 2*(self.night-1) + 1
+            
+            # final_worlds[world][player][variable][n]
+            final_worlds: list[list[list[list]]] = []
+            class SolutionCallback(cp_model.CpSolverSolutionCallback):
+                def __init__(sol_self):
+                    super().__init__()
+                    sol_self.solution_count = 0
+                    
+                def OnSolutionCallback(sol_self):
+                    final_worlds.append([])
+                    for p in range(player_count):
+                        final_worlds[-1].append([])
+                        final_worlds[-1][-1].append([] for _ in range(5))
+                        for n in range(now+1):
+                            p_assigned_char = next(
+                                c
+                                for c, j in zip(self.character_list, assigned_char[n][p])
+                                if sol_self.boolean_value(j)
+                            )
+                            final_worlds[-1][-1][0].append(p_assigned_char)
+                            p_target = next(
+                                (
+                                    q
+                                    for q, j in zip(self.character_list, target[n][p])
+                                    if sol_self.boolean_value(j)
+                                ),
+                                None
+                            )
+                            final_worlds[-1][-1][1].append(p_target)
+                            p_player_learned = next(
+                                (
+                                    q
+                                    for q, j in zip(self.character_list, player_learned[n][p])
+                                    if sol_self.boolean_value(j)
+                                ),
+                                None
+                            )
+                            final_worlds[-1][-1][2].append(p_player_learned)
+                            p_tokens = [
+                                t
+                                for t, i in zip(self.token_list, tokens[n][p])
+                                if sol_self.boolean_value(i)
+                            ]
+                            final_worlds[-1][-1][3].append(p_tokens)
+                            p_is_evil = sol_self.boolean_value(is_evil[n][p])
+                            final_worlds[-1][-1][4].append(p_is_evil)
+                            
+            callback = SolutionCallback()
+            solver = cp_model.CpSolver()
+            solver.parameters.enumerate_all_solutions = True
+            solver.solve(model, callback)
+            self.game_ended(final_worlds)
 
-        if self.night == 1:
-            if self.script_index != 0:
-                raise NotImplementedError
-            _, variables = first_night_model(self)
-
-            assigned_char, target, player_learned, tokens, is_evil = variables
-            possible_char_indexes: list[list] = [[] for _ in self.players]
-            for i, p in enumerate(self.players):
-                for c in range(len(self.character_list)):
-                    if self.variable_is_possible(assigned_char[i][c]):
-                        possible_char_indexes[i].append(1)
-                    else:
-                        possible_char_indexes[i].append(0)
-                p.possible_characters = [
-                    self.character_list[c]
-                    for c in range(len(self.character_list))
-                    if possible_char_indexes[i][c]
-                ]
-                if len(p.possible_characters) == 1:
-                    ...
-
-            possible_alignment_indexes: list[list] = [[] for _ in self.players]
-            for i, p in enumerate(self.players):
-                if self.variable_is_possible(is_evil[i]):
-                    possible_alignment_indexes[i].append(1)
-                else:
-                    possible_alignment_indexes[i].append(0)
-                if self.variable_is_possible(is_evil[i].Not()):
-                    possible_alignment_indexes[i].append(1)
-                else:
-                    possible_alignment_indexes[i].append(0)
-                if sum(possible_alignment_indexes[i]) == 1:
-                    p.alignment = "evil" if possible_alignment_indexes[0] else "good"
-                else:
-                    p.alignment = None
-
-            # possible_token_indexes: list[list] = [[] for _ in self.players]
-            # for i, p in enumerate(self.players):
-            #     for t in range(len(token_list)):
-            #         if variable_is_possible(tokens[i][t]):
-            #             possible_token_indexes[i].append(1)
-            #         else:
-            #             possible_token_indexes[i].append(0)
-            #     p.tokens
-
-        self.all_night_choices.append(self.previous_night_choices)
-
-        self.toggle_alignments(setToggle=False)
-        self.execution.set_enabled(True)
-        self.night_control.night_phase = "Day"
+        if nighttime:
+            self.toggle_alignments(setToggle=False)
+            self.execution.set_enabled(True)
+            self.night_control.night_phase = "Day"
+        else:
+            self.toggle_alignments(setToggle=True)
+            self.execution.set_enabled(False)
+            self.night_control.night_phase = "Night"
         for seat in self.seats:
             seat.seat.config(text="")
+
+    def determine_possible_variables(self, model, assigned_char, is_evil):
+        possible_char_indexes: list[list] = [[] for _ in self.players]
+        for i, p in enumerate(self.players):
+            for c in range(len(self.character_list)):
+                if self.variable_is_possible(model, assigned_char[-1][i][c]):
+                    possible_char_indexes[i].append(1)
+                else:
+                    possible_char_indexes[i].append(0)
+            p.possible_characters = [
+                self.character_list[c]
+                for c in range(len(self.character_list))
+                if possible_char_indexes[i][c]
+            ]
+            if len(p.possible_characters) == 1:
+                #TODO improve
+                print(f"{p.name} is {self.character_list[c].name}")
+
+        possible_alignment_indexes: list[list] = [[] for _ in self.players]
+        for i, p in enumerate(self.players):
+            if self.variable_is_possible(model, is_evil[-1][i]):
+                possible_alignment_indexes[i].append(1)
+            else:
+                possible_alignment_indexes[i].append(0)
+            if self.variable_is_possible(model, is_evil[-1][i].Not()):
+                possible_alignment_indexes[i].append(1)
+            else:
+                possible_alignment_indexes[i].append(0)
+            if sum(possible_alignment_indexes[i]) == 1:
+                p.alignment = "evil" if possible_alignment_indexes[i][0] else "good"
+            else:
+                p.alignment = None
+        
+        # possible_token_indexes: list[list] = [[] for _ in self.players]
+        # for i, p in enumerate(self.players):
+        #     for t in range(len(token_list)):
+        #         if variable_is_possible(tokens[i][t]):
+        #             possible_token_indexes[i].append(1)
+        #         else:
+        #             possible_token_indexes[i].append(0)
+        #     p.tokens
+
+    def game_ended(self, final_worlds):
+        ...
 
     def toggle_alignments(self, setToggle=None) -> None:
         if setToggle is None:
@@ -230,22 +292,18 @@ class QuantumClocktower(Tk):
         self.seat_menu.player = player
         self.seat_menu.post(event.x_root, event.y_root)
 
-    def variable_is_possible(self, variable) -> bool:
+    def variable_is_possible(self, model: cp_model.CpModel, variable) -> bool:
         solver = cp_model.CpSolver()
-        test_model, (_, target, _, _, _) = first_night_model(self)
-        test_model.add(variable == 1)
-        for player, _, chosen_player in self.previous_night_choices:
-            player_index = self.players.index(player)
-            if chosen_player is None:
-                test_model.add(sum(target[player_index]) == 0)
-            else:
-                test_model.add(
-                    target[player_index][self.players.index(chosen_player)] == 1
-                )
-        return bool(solver.solve(test_model) in (cp_model.OPTIMAL, cp_model.FEASIBLE))
+        model.add_assumption(variable)
+        possible = bool(solver.solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE))
+        model.clear_assumptions()
+        return possible
 
 
-script_index = int(input("\nScripts:\n(1). Teensy\nNumber: ") or "1") - 1
+print("\nScripts:")
+for i, name in enumerate(scripts, start=1):
+    print(f"({i}). {name}")
+script_index = int(input("Number: ")) - 1
 
 player_count = int(input("Number of players: ") or "6")
 
