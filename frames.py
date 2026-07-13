@@ -127,7 +127,7 @@ class ExecutionFrame(Frame):
         self.executee_selector.grid(row=1)
 
     @property
-    def executee(self) -> str:
+    def executee_name(self) -> str:
         return self.executee_selector.get()
 
     def set_enabled(self, enabled: bool) -> None:

@@ -15,9 +15,12 @@ def create_model(
     daytime: bool,
     player_making_choice: "Player | None" = None,
     chosen_player: "Player | None" = None,
+    character_learned_index: int | None = None,
+    bluff_indexes: int | None = None,
+    number_learned: int | None = None,
 ):
     """Returns (model, variables)\n
-    where variables = (assigned_char, target, player_learned, tokens, is_evil, good_wins, evil_wins, game_over)"""
+    where variables = (assigned_char, target, character_learned, tokens, is_evil, good_wins, evil_wins, game_over)"""
     model = cp_model.CpModel()
 
     player_count = len(clocktower.players)
@@ -26,47 +29,47 @@ def create_model(
     else:
         player_making_choice_index = None
     
-    assigned_char: list[list[list]] = [[] for _ in range(2*(night-1) + 1)]
-    target: list[list[list]] = [[] for _ in range(2*(night-1) + 1)]
-    player_learned: list[list[list]] = [[] for _ in range(2*(night-1) + 1)]
-    tokens: list[list[list]] = [[] for _ in range(2*(night-1) + 1)]
-    is_evil: list[list] = [[] for _ in range(2*(night-1) + 1)]
-    good_wins = []
-    evil_wins = []
-    game_ended = []
-    if daytime:
-        assigned_char.append([])
-        target.append([])
-        player_learned.append([])
-        tokens.append([])
-        is_evil.append([])
-    
     if daytime:
         now = 2*(night-1) + 1
     else:
         now = 2*(night-1)
+    
+    assigned_char: list[list[list]] = [[] for _ in range(now+1)]
+    target: list[list[list]] = [[] for _ in range(now+1)]
+    character_learned: list[list[list]] = [[] for _ in range(now+1)]
+    number_learned: list[list] = [[] for _ in range(now+1)]
+    tokens: list[list[list]] = [[] for _ in range(now+1)]
+    is_evil: list[list] = [[] for _ in range(now+1)]
+    good_wins = []
+    evil_wins = []
+    game_ended = []
+    
     # Night and Day Constraints
     for n in range(now+1):
         for p in range(player_count):
             assigned_char[n].append([])
             target[n].append([])
-            player_learned[n].append([])
+            character_learned[n].append([])
             tokens[n].append([])
             for c in range(len(clocktower.character_list)):
                 assigned_char[n][p].append(model.new_bool_var(f"assigned_char_{n}_{p}_{c}"))
+                character_learned[n][p].append(model.new_bool_var(f"character_learned_{n}_{p}_{c}"))
             for q in range(player_count):
                 target[n][p].append(model.new_bool_var(f"target_{n}_{p}_{q}"))
-                player_learned[n][p].append(model.new_bool_var(f"player_learned_{n}_{p}_{q}"))
             for t in range(len(clocktower.token_list)):
                 tokens[n][p].append(model.new_bool_var(f"token_{n}_{p}_{t}"))
-
+            
+            
+            number_learned[n].append(model.new_int_var(-1, 15, f"number_learned_{n}_{p}"))
+            
+            
         set_is_evil(clocktower, model, player_count, assigned_char, tokens, is_evil, n)
         
         # one character per person, max one target, max one player learned
         for p in range(player_count):
             model.add(sum(assigned_char[n][p]) == 1)
             model.add(sum(target[n][p]) <= 1)
-            model.add(sum(player_learned[n][p]) <= 1)
+            model.add(sum(character_learned[n][p]) <= 1)
 
         # correct targeting and player learned
         for p in range(player_count):
@@ -89,13 +92,13 @@ def create_model(
                 )
             )
             model.add(sum(target[n][p]) == p_can_target)
-            model.add(sum(player_learned[n][p]) == p_learns_character)
+            model.add(sum(character_learned[n][p]) == p_learns_character)
 
         #TODO: uncomment when tokens are finished
         # tokens
         # for token in clocktower.token_list:
         #     if token.conditions is not None:
-        #         token.conditions[0](
+        #         token.conditions(
         #             model,
         #             clocktower.players,
         #             clocktower.token_list,
@@ -104,7 +107,9 @@ def create_model(
         #             character_list=clocktower.character_list,
         #             assigned_char=assigned_char,
         #             target=target,
-        #             is_evil=is_evil
+        #             is_evil=is_evil,
+        #             executed_player=clocktower.get_player(clocktower.execution.executee_name),
+        #             character_learned=character_learned,
         #         )
 
         keep_character_across_nights(clocktower, model, player_count, assigned_char, tokens, n)
@@ -154,11 +159,20 @@ def create_model(
             model.add(
                 target[now][player_making_choice_index][
                     clocktower.players.index(chosen_player)
-                ]
-                == 1
+                ] == 1
             )
+        if character_learned_index is None:
+            model.add(sum(character_learned[now][player_making_choice_index]) == 0)
+        else:
+            model.add(
+                character_learned[now][player_making_choice_index][
+                    character_learned_index
+                ] == 1
+            )
+        if bluff_indexes is None:
+            ...
 
-    variables = assigned_char, target, player_learned, tokens, is_evil, good_wins, evil_wins, game_ended
+    variables = assigned_char, target, character_learned, tokens, is_evil, good_wins, evil_wins, game_ended
     return model, variables
 
 
@@ -362,7 +376,7 @@ def set_is_evil(
     assigned_char: list[list],
     tokens: list[list],
     is_evil: list[list],
-    n: int
+    n: int,
 ):
     """
     Sets is_evil and the number of evil players at setup

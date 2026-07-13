@@ -58,7 +58,7 @@ def retain_token(
     tokens: list[list[list[cp_model.IntVar]]],
     n: int,
     token_index: int,
-    only_if: cp_model.IntVar | None = None
+    only_if: cp_model.IntVar | None = None,
 ):
     if n == 0:
         return
@@ -97,6 +97,11 @@ full_sized_char_list = [ # TODO: add learns_number/group of characters. or just 
     # Character("lleech", "evil", "demon",),
     # Character("vortox", "evil", "demon",),
 ]
+full_sized_night_order = []
+full_sized_char_list = [
+    x[0] for x in sorted(zip(full_sized_char_list, full_sized_night_order), key=lambda x: x[1])
+]
+
 
 teensy_char_list = [
     Character("balloonist", "good", "townsfolk", lambda _: True, lambda _: False),
@@ -117,6 +122,185 @@ teensy_night_order = [8, 4, 0, 5, 3, 2, 999, 999, 999, 1, 999, 7, 6]
 teensy_char_list = [
     x[0] for x in sorted(zip(teensy_char_list, teensy_night_order), key=lambda x: x[1])
 ]
+
+
+def add_pixie_known_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    character_list: list[Character] = kwargs["character_list"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
+    character_index = [c.name for c in character_list].index("pixie")
+    token_index = [t.name for t in token_list].index("pixie_known")
+
+
+def add_mathematician_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_gambler_killed_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_fool_protected_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_fool_ability_used_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_tea_lady_protection_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_mayor_win_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_puzzledrunk_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_damsel_win_and_guess_used_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_is_the_drunk_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_haircuts_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_devils_advocate_protected_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_mastermind_day_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_lleech_host_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_lleech_dead_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
+
+
+def add_vortox_dead_token_condition(
+    model: cp_model.CpModel,
+    player_list: list[Player],
+    token_list: list[Token],
+    tokens: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    ...
 
 
 def add_balloonist_known_token_condition(
@@ -586,7 +770,7 @@ def add_executed_token_condition(
     token_list: list[Token],
     tokens: list[list[cp_model.IntVar]],
     n: int,
-    **kwargs
+    **kwargs,
 ):
     ...
 
@@ -597,7 +781,7 @@ def add_dead_token_condition(
     token_list: list[Token],
     tokens: list[list[cp_model.IntVar]],
     n: int,
-    **kwargs
+    **kwargs,
 ):
     executed_index = kwargs["executed_index"]
     token_index = [t.name for t in token_list].index("dead")

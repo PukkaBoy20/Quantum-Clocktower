@@ -78,10 +78,20 @@ class QuantumClocktower(Tk):
         ):
             return False
 
-        if isinstance(final_info, int):  # Currently unused
+        if isinstance(final_info, int):
             number_learned = final_info
         else:
-            number_learned = False
+            number_learned = None
+
+        if info_type == "One Character":
+            character_learned_index = [c.name for c in self.character_list].index(final_info)
+        else:
+            character_learned_index = None
+        
+        if info_type == "Three Characters":
+            bluff_indexes = [[c.name for c in self.character_list].index(bluff_name) for bluff_name in final_info]
+        else:
+            bluff_indexes = None
 
         if chosen_player_name == "None":
             chosen_player = None
@@ -91,10 +101,7 @@ class QuantumClocktower(Tk):
         if self.script_index != 0: # TODO implement new scripts here
             raise NotImplementedError
 
-        if number_learned is not False:
-            return False
-
-        model, variables = create_model(self, self.night, False, self.seat_menu.player, chosen_player)
+        model, variables = create_model(self, self.night, False, self.seat_menu.player, chosen_player, character_learned_index, bluff_indexes, number_learned)
         # good_wins, evil_wins, game_over = variables[5:8]
         solver = cp_model.CpSolver()
         # solver.parameters.log_search_progress = True
@@ -120,7 +127,7 @@ class QuantumClocktower(Tk):
     def day_finished(self) -> bool:
         if self.night_control.night_phase == "Setup":
             return True
-        if self.execution.executee != "":
+        if self.execution.executee_name != "":
             return True
         return False
 
@@ -154,7 +161,7 @@ class QuantumClocktower(Tk):
             raise NotImplementedError
         model, variables = create_model(self, self.night, False)
         
-        assigned_char, target, player_learned, tokens, is_evil, good_wins, evil_wins, game_over = variables
+        assigned_char, target, character_learned, tokens, is_evil, good_wins, evil_wins, game_over = variables
         
         self.determine_possible_variables(model, assigned_char, is_evil)
         
@@ -180,32 +187,32 @@ class QuantumClocktower(Tk):
                         for n in range(now+1):
                             p_assigned_char = next(
                                 c
-                                for c, j in zip(self.character_list, assigned_char[n][p])
-                                if sol_self.boolean_value(j)
+                                for c, c_2 in zip(self.character_list, assigned_char[n][p])
+                                if sol_self.boolean_value(c_2)
                             )
                             final_worlds[-1][-1][0].append(p_assigned_char)
                             p_target = next(
                                 (
                                     q
-                                    for q, j in zip(self.character_list, target[n][p])
-                                    if sol_self.boolean_value(j)
+                                    for q, q_2 in zip(self.players, target[n][p])
+                                    if sol_self.boolean_value(q_2)
                                 ),
                                 None
                             )
                             final_worlds[-1][-1][1].append(p_target)
-                            p_player_learned = next(
+                            p_character_learned = next(
                                 (
-                                    q
-                                    for q, j in zip(self.character_list, player_learned[n][p])
-                                    if sol_self.boolean_value(j)
+                                    c
+                                    for c, c_2 in zip(self.character_list, character_learned[n][p])
+                                    if sol_self.boolean_value(c_2)
                                 ),
                                 None
                             )
-                            final_worlds[-1][-1][2].append(p_player_learned)
+                            final_worlds[-1][-1][2].append(p_character_learned)
                             p_tokens = [
                                 t
-                                for t, i in zip(self.token_list, tokens[n][p])
-                                if sol_self.boolean_value(i)
+                                for t, t_2 in zip(self.token_list, tokens[n][p])
+                                if sol_self.boolean_value(t_2)
                             ]
                             final_worlds[-1][-1][3].append(p_tokens)
                             p_is_evil = sol_self.boolean_value(is_evil[n][p])
