@@ -52,19 +52,43 @@ class NightActionFrame(Frame):
                     vcmd=self.master.master.int_vcmd,  # type: ignore
                 )
                 self.specific_info_box.grid(row=3, column=1)
-            case "One Character":
+            case "One Character": # these are a bit broken with alchemist
+                char_types = ["townsfolk", "outsider", "minion", "demon"]
+                sorted_char_names = []
+                for type in char_types:
+                    sorted_char_names.extend(
+                        sorted(
+                            [
+                                c.name
+                                for c in self.master.master.character_list
+                                if c.character_type == type
+                            ]  # type: ignore
+                        )
+                    )
                 self.specific_info_box = Combobox(
                     self,
                     state="readonly",
-                    values=[c.name for c in self.master.master.character_list],  # type: ignore
+                    values=sorted_char_names,
                 )
                 self.specific_info_box.grid(row=3, column=1)
             case "Three Characters":
+                char_types = ["townsfolk", "outsider", "minion", "demon"]
+                sorted_char_names = []
+                for type in char_types:
+                    sorted_char_names.extend(
+                        sorted(
+                            [
+                                c.name
+                                for c in self.master.master.character_list
+                                if c.character_type == type
+                            ]  # type: ignore
+                        )
+                    )
                 self.specific_info_box = Listbox(
                     self,
                     selectmode="multiple",
                     listvariable=StringVar(
-                        value=[c.name for c in self.master.master.character_list]  # type: ignore
+                        value=sorted_char_names
                     ),
                 )
                 self.specific_info_box.grid(row=3, column=1)

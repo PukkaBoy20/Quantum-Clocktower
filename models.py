@@ -16,7 +16,7 @@ def create_model(
     player_making_choice: "Player | None" = None,
     chosen_player: "Player | None" = None,
     character_learned_index: int | None = None,
-    bluff_indexes: int | None = None,
+    chosen_bluff_indexes: tuple | None = None,
     number_learned: int | None = None,
 ):
     """Returns (model, variables)\n
@@ -37,7 +37,7 @@ def create_model(
     assigned_char: list[list[list]] = [[] for _ in range(now+1)]
     target: list[list[list]] = [[] for _ in range(now+1)]
     character_learned: list[list[list]] = [[] for _ in range(now+1)]
-    number_learned: list[list] = [[] for _ in range(now+1)]
+    num_learned: list[list] = [[] for _ in range(now+1)]
     tokens: list[list[list]] = [[] for _ in range(now+1)]
     is_evil: list[list] = [[] for _ in range(now+1)]
     good_wins = []
@@ -58,20 +58,18 @@ def create_model(
                 target[n][p].append(model.new_bool_var(f"target_{n}_{p}_{q}"))
             for t in range(len(clocktower.token_list)):
                 tokens[n][p].append(model.new_bool_var(f"token_{n}_{p}_{t}"))
-            
-            
-            number_learned[n].append(model.new_int_var(-1, 15, f"number_learned_{n}_{p}"))
-            
+            num_learned[n].append(model.new_int_var(-1, 15, f"num_learned_{n}_{p}"))
             
         set_is_evil(clocktower, model, player_count, assigned_char, tokens, is_evil, n)
         
-        # one character per person, max one target, max one player learned
+        # one character per person, max one target, max one character learned
         for p in range(player_count):
             model.add(sum(assigned_char[n][p]) == 1)
             model.add(sum(target[n][p]) <= 1)
             model.add(sum(character_learned[n][p]) <= 1)
 
-        # correct targeting and player learned
+        # TODO remake this whole thing
+        # correct targeting and character learned
         for p in range(player_count):
             p_can_target = model.new_bool_var(f"{n}_{p}_can_target")
             model.add(
@@ -93,7 +91,7 @@ def create_model(
             )
             model.add(sum(target[n][p]) == p_can_target)
             model.add(sum(character_learned[n][p]) == p_learns_character)
-
+        
         #TODO: uncomment when tokens are finished
         # tokens
         # for token in clocktower.token_list:
@@ -107,6 +105,8 @@ def create_model(
         #             character_list=clocktower.character_list,
         #             assigned_char=assigned_char,
         #             target=target,
+        #             character_learned=character_learned,
+        #             num_learned=num_learned,
         #             is_evil=is_evil,
         #             executed_player=clocktower.get_player(clocktower.execution.executee_name),
         #             character_learned=character_learned,
@@ -122,7 +122,7 @@ def create_model(
         for p, choices in enumerate(clocktower.all_night_choices[n]):
             if not choices or (n == now and p == player_making_choice_index):
                 continue
-            number_learned, old_chosen_player = choices
+            old_chosen_player, old_character_learned_index, old_number_learned = choices
             if old_chosen_player is None:
                 model.add(
                     sum(target[n][p]) == 0
@@ -130,6 +130,22 @@ def create_model(
             else:
                 model.add(
                     target[n][p][clocktower.players.index(old_chosen_player)] == 1
+                )
+            if old_character_learned_index is None:
+                model.add(
+                    sum(character_learned[n][p]) == 0
+                )
+            else:
+                model.add(
+                    character_learned[n][p][old_character_learned_index] == 1
+                )
+            if old_number_learned is None:
+                model.add(
+                    num_learned[n][p] == -1
+                )
+            else:
+                model.add(
+                    num_learned[n][p] == old_number_learned
                 )
     
     # Setup constraints:
@@ -169,8 +185,12 @@ def create_model(
                     character_learned_index
                 ] == 1
             )
-        if bluff_indexes is None:
-            ...
+        if number_learned is None:
+            model.add(num_learned[now][player_making_choice_index] == -1)
+        else:
+            model.add(num_learned[now][player_making_choice_index] == number_learned)
+    
+    set_bluffs(clocktower, model, player_count, player_making_choice_index, chosen_bluff_indexes, assigned_char, n)
 
     variables = assigned_char, target, character_learned, tokens, is_evil, good_wins, evil_wins, game_ended
     return model, variables
@@ -414,3 +434,73 @@ def set_is_evil(
         is_evil[n].append(p_is_evil)
     if n == 0:
         model.add(sum(is_evil[0]) == evil_count(player_count) + extra_evils)
+
+
+
+def set_bluffs(
+    clocktower: "QuantumClocktower",
+    model: "cp_model.CpModel",
+    player_count: int,
+    player_making_choice_index: int | None,
+    chosen_bluff_indexes: tuple | None,
+    assigned_char: list[list],
+    n: int,
+    ):
+    
+    new_all_chosen_bluff_indexes = clocktower.all_chosen_bluff_indexes.copy()
+    if n == 0 and player_making_choice_index is not None:
+        new_all_chosen_bluff_indexes[player_making_choice_index] = chosen_bluff_indexes
+    
+    learned_bluffs = [
+        model.new_bool_var(f"{p}_learned_bluffs")
+        for p in range(player_count)
+    ]
+    for p in range(player_count):
+        match new_all_chosen_bluff_indexes[p]:
+            case None:
+                model.add(learned_bluffs[p] == 0)
+            case (_, _, _):
+                model.add(learned_bluffs[p] == 1)
+    if player_count < 7:
+        model.add(sum(learned_bluffs) == 0)
+        return
+    model.add(sum(learned_bluffs) > 0)
+    if clocktower.evils_predetermined:
+        for i, p in enumerate(clocktower.players):
+            if p.alignment == "good":
+                model.add(learned_bluffs[i] == 0)
+    actual_bluffs = [
+        model.new_int_var_from_domain(
+            cp_model.Domain.from_values(
+                [
+                    j
+                    for j, c in enumerate(clocktower.character_list)
+                    if c.alignment == "good"
+                ]
+            ),
+            f"bluff_{i}"
+        )
+        for i in range(3)
+    ]
+    model.add_all_different(actual_bluffs)
+    
+    for p in range(player_count):
+        chosen_bluff_list = new_all_chosen_bluff_indexes[p]
+        p_is_starting_demon = model.new_bool_var(f"{p}_making_choice_is_starting_demon")
+        model.add_max_equality(
+            p_is_starting_demon,
+            [
+                assigned_char[0][p][j]
+                for j, c in enumerate(clocktower.character_list)
+                if c.character_type == "demon"
+            ]
+        )
+        if chosen_bluff_list is None:
+            model.add(p_is_starting_demon == 0)
+        elif chosen_bluff_list != ():
+            for a, b in zip(actual_bluffs, chosen_bluff_list):
+                model.add(a == b).only_enforce_if(p_is_starting_demon)
+    
+    for p in range(player_count):
+        for bluff in actual_bluffs:
+            model.add_element(bluff, assigned_char[0][p], 0)

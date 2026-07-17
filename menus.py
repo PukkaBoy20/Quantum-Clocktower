@@ -52,15 +52,19 @@ class SeatMenu(Menu):
         match self.night_action_frame.specific_info_box:
             case None:
                 final_info = None
-            case Entry() | Combobox():
+            case Combobox():
+                final_info = self.night_action_frame.specific_info_box.get()
+            case Entry():
                 final_info = self.night_action_frame.specific_info_box.get()
                 if final_info == "":
                     final_info = False
+                else:
+                    final_info = int(final_info)
             case Listbox():
                 final_info = [
                     self.night_action_frame.specific_info_box.get(i)
                     for i in self.night_action_frame.specific_info_box.curselection()
                 ]
-                if len(final_info) != 3 or len(self.master.player_list) < 7:  # type: ignore
+                if len(final_info) != 3 or len(self.master.players) < 7:  # type: ignore
                     final_info = False
         return final_info

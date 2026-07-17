@@ -34,12 +34,14 @@ class QuantumClocktower(Tk):
         self.night = 1
         self.show_alignments = False
         self.all_night_choices: list[list] = []
+        self.all_chosen_bluff_indexes: list[tuple] = [() for _ in range(player_count)]
 
         evil_players = sample(range(player_count), evil_count(player_count)) #nosec
 
         self.seat_names: dict[SeatFrame, Entry] = {}
         self.players: list[Player] = []
 
+        self.evils_predetermined = evils_predetermined
         for i in range(player_count):
             if evils_predetermined:
                 if i in evil_players:
@@ -89,9 +91,9 @@ class QuantumClocktower(Tk):
             character_learned_index = None
         
         if info_type == "Three Characters":
-            bluff_indexes = [[c.name for c in self.character_list].index(bluff_name) for bluff_name in final_info]
+            chosen_bluff_indexes = tuple([c.name for c in self.character_list].index(bluff_name) for bluff_name in final_info)
         else:
-            bluff_indexes = None
+            chosen_bluff_indexes = None
 
         if chosen_player_name == "None":
             chosen_player = None
@@ -101,14 +103,15 @@ class QuantumClocktower(Tk):
         if self.script_index != 0: # TODO implement new scripts here
             raise NotImplementedError
 
-        model, variables = create_model(self, self.night, False, self.seat_menu.player, chosen_player, character_learned_index, bluff_indexes, number_learned)
-        # good_wins, evil_wins, game_over = variables[5:8]
+        model, _ = create_model(self, self.night, False, self.seat_menu.player, chosen_player, character_learned_index, chosen_bluff_indexes, number_learned)
         solver = cp_model.CpSolver()
-        # solver.parameters.log_search_progress = True
         if solver.solve(model) in (cp_model.FEASIBLE, cp_model.OPTIMAL):
             # TODO: make game end partway through night
             self.all_night_choices[-1][self.players.index(self.seat_menu.player)] = (
-                number_learned, chosen_player
+                chosen_player, character_learned_index, number_learned 
+            )
+            self.all_chosen_bluff_indexes[self.players.index(self.seat_menu.player)] = (
+                chosen_bluff_indexes
             )
         else:
             print("Invalid Choice")
@@ -156,10 +159,10 @@ class QuantumClocktower(Tk):
     def end_night_or_day(self) -> None:
         if min(len(i) for i in self.all_night_choices[-1]) == 0:
             return
-        nighttime = self.night_control.night_phase == "Night"
+        daytime = self.night_control.night_phase == "Day"
         if self.script_index != 0: # TODO: implement new scripts here
             raise NotImplementedError
-        model, variables = create_model(self, self.night, False)
+        model, variables = create_model(self, self.night, daytime)
         
         assigned_char, target, character_learned, tokens, is_evil, good_wins, evil_wins, game_over = variables
         
@@ -167,10 +170,10 @@ class QuantumClocktower(Tk):
         
         if not self.variable_is_possible(model, game_over[-1].Not()):
             print("GAME OVER")
-            if nighttime:
-                now = 2*(self.night-1)
-            else:
+            if daytime:
                 now = 2*(self.night-1) + 1
+            else:
+                now = 2*(self.night-1)
             
             # final_worlds[world][player][variable][n]
             final_worlds: list[list[list[list]]] = []
@@ -224,14 +227,14 @@ class QuantumClocktower(Tk):
             solver.solve(model, callback)
             self.game_ended(final_worlds)
 
-        if nighttime:
-            self.toggle_alignments(setToggle=False)
-            self.execution.set_enabled(True)
-            self.night_control.night_phase = "Day"
-        else:
+        if daytime:
             self.toggle_alignments(setToggle=True)
             self.execution.set_enabled(False)
             self.night_control.night_phase = "Night"
+        else:
+            self.toggle_alignments(setToggle=False)
+            self.execution.set_enabled(True)
+            self.night_control.night_phase = "Day"
         for seat in self.seats:
             seat.seat.config(text="")
 
