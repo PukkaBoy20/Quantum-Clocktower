@@ -100,9 +100,6 @@ class QuantumClocktower(Tk):
         else:
             chosen_player = self.get_player(chosen_player_name)
 
-        if self.script_index != 0: # TODO implement new scripts here
-            raise NotImplementedError
-
         model, _ = create_model(self, self.night, False, self.seat_menu.player, chosen_player, character_learned_index, chosen_bluff_indexes, number_learned)
         solver = cp_model.CpSolver()
         if solver.solve(model) in (cp_model.FEASIBLE, cp_model.OPTIMAL):
@@ -164,7 +161,7 @@ class QuantumClocktower(Tk):
             raise NotImplementedError
         model, variables = create_model(self, self.night, daytime)
         
-        assigned_char, target, character_learned, tokens, is_evil, good_wins, evil_wins, game_over = variables
+        assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_over = variables
         
         self.determine_possible_variables(model, assigned_char, is_evil)
         
@@ -206,7 +203,7 @@ class QuantumClocktower(Tk):
                             p_character_learned = next(
                                 (
                                     c
-                                    for c, c_2 in zip(self.character_list, character_learned[n][p])
+                                    for c, c_2 in zip(self.character_list, learned_char[n][p])
                                     if sol_self.boolean_value(c_2)
                                 ),
                                 None
