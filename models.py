@@ -1,4 +1,4 @@
-from chars import Player, get_character, evil_alignment_token_names, evil_registration_token_names, initial_extra_demon_token_names, character_change_token_names, winning_token_names, losing_token_names
+from chars import Player, get_character, evil_alignment_token_names, evil_registration_token_names, initial_extra_demon_token_names, character_change_token_names, demon_safe_token_names, winning_token_names, losing_token_names
 from ortools.sat.python import cp_model
 
 from typing import TYPE_CHECKING
@@ -36,9 +36,9 @@ def create_model(
     else:
         now = 2*(night-1)
     
-    assigned_char: list[list[list]] = [[] for _ in range(now+1)]
+    assigned_char: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
     target: list[list[list]] = [[] for _ in range(now+1)]
-    learned_char: list[list[list]] = [[] for _ in range(now+1)]
+    learned_char: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
     num_learned: list[list] = [[] for _ in range(now+1)]
     tokens: list[list[list]] = [[] for _ in range(now+1)]
     is_evil: list[list] = [[] for _ in range(now+1)]
@@ -47,6 +47,7 @@ def create_model(
     mad_char: list[list[list]] = [[] for _ in range(now+1)]
     abnormal_ability: list[list] = [[] for _ in range(now+1)] # for mathematician
     droisoned: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
+    vortoxed: list[list] = [[] for _ in range(now+1)]
     good_wins = []
     evil_wins = []
     game_ended = []
@@ -72,6 +73,7 @@ def create_model(
             num_learned[n].append(model.new_int_var(-1, 15, f"num_learned_{n}_{p}"))
             abnormal_ability[n].append(model.new_bool_var(f"abnormal_ability_{n}_{p}"))
             droisoned[n].append(model.new_bool_var(f"{p}_is_droisoned_{n}"))
+            vortoxed[n].append(model.new_bool_var(f"{p}_is_vortoxed_{n}"))
             
         set_is_evil(clocktower, model, player_count, assigned_char, tokens, is_evil, n)
         for p in range(player_count):
@@ -90,7 +92,7 @@ def create_model(
                 ]
             )
         set_droisoning(clocktower, model, player_count, tokens, droisoned, n)
-        
+        set_vortoxed(clocktower, model, player_count, assigned_char, tokens, droisoned, vortoxed, n)
         
         # one character per person, max one target, max one character learned
         for p in range(player_count):
@@ -98,31 +100,39 @@ def create_model(
             model.add(sum(target[n][p]) <= 1)
             model.add(sum(learned_char[n][p]) <= 1)
 
-        # TODO remake this whole thing
-        # correct targeting and character learned
-        for p in range(player_count):
-            p_can_target = model.new_bool_var(f"{n}_{p}_can_target")
-            model.add(
-                p_can_target
-                == sum(
-                    assigned_char[n][p][j]
-                    for j, c in enumerate(clocktower.character_list)
-                    if c.can_target(n)
-                )
-            )
-            p_learns_character = model.new_bool_var(f"{n}_{p}_learns_character")
-            model.add(
-                p_learns_character
-                == sum(
-                    assigned_char[n][p][j]
-                    for j, c in enumerate(clocktower.character_list)
-                    if c.learns_character(n)
-                )
-            )
-            model.add(sum(target[n][p]) == p_can_target)
-            model.add(sum(learned_char[n][p]) == p_learns_character)
         
-        sober_vortox_exists = make_sober_vortox_exists(clocktower, model, player_count, assigned_char, droisoned, n)
+        executed_indexes = ( # TODO: change this to retain
+            None
+            if clocktower.execution.executee_name == "None" or not n % 2
+            else [p.name for p in clocktower.players].index(clocktower.execution.executee_name)
+        )
+        
+        
+        
+        
+        
+        
+
+
+
+        set_night_info_restrictions(
+            clocktower,
+            model,
+            player_count,
+            assigned_char,
+            target,
+            learned_char,
+            num_learned,
+            registers_as_evil,
+            abnormal_ability,
+            droisoned,
+            vortoxed,
+            n,
+            executed_indexes
+        )
+
+        
+        
         
         if "atheist" in [c.name for c in clocktower.character_list]:
             atheist_index = [c.name for c in clocktower.character_list].index("atheist")
@@ -133,32 +143,28 @@ def create_model(
                 ) == 0
             )
         
-        # for token in clocktower.token_list:
-        #     if token.conditions is not None:
-        #         token.conditions(
-        #             model,
-        #             clocktower.players,
-        #             clocktower.token_list,
-        #             tokens,
-        #             n,
-        #             character_list=clocktower.character_list,
-        #             assigned_char=assigned_char,
-        #             target=target,
-        #             learned_char=learned_char,
-        #             num_learned=num_learned,
-        #             is_evil=is_evil,
-        #             registers_as_evil=registers_as_evil,
-        #             executed_index=(
-        #                 None
-        #                 if clocktower.execution.executee_name == "None" or not n % 2
-        #                 else [p.name for p in clocktower.players].index(clocktower.execution.executee_name)
-        #             ),
-        #             sober_vortox_exists=sober_vortox_exists,
-        #             remembered_tokens=remembered_tokens,
-        #             mad_char=mad_char,
-        #             abnormal_ability=abnormal_ability,
-        #             droisoned=droisoned,
-        #         )
+        for token in clocktower.token_list:
+            if token.conditions is not None:
+                token.conditions(
+                    model,
+                    clocktower.players,
+                    clocktower.token_list,
+                    tokens,
+                    n,
+                    character_list=clocktower.character_list,
+                    assigned_char=assigned_char,
+                    target=target,
+                    learned_char=learned_char,
+                    num_learned=num_learned,
+                    is_evil=is_evil,
+                    registers_as_evil=registers_as_evil,
+                    executed_indexes=executed_indexes,
+                    remembered_tokens=remembered_tokens,
+                    mad_char=mad_char,
+                    abnormal_ability=abnormal_ability,
+                    droisoned=droisoned,
+                    vortoxed=vortoxed,
+                )
 
         keep_character_across_nights(clocktower, model, player_count, assigned_char, tokens, n)
 
@@ -258,14 +264,88 @@ def create_model(
     variables = assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended
     return model, variables
 
-
-
-def make_sober_vortox_exists(
+def set_night_info_restrictions(
     clocktower: "QuantumClocktower",
     model: cp_model.CpModel,
     player_count: int,
-    assigned_char: list[list[list]],
+    assigned_char: list[list[list[cp_model.IntVar]]],
+    target: list[list[list[cp_model.IntVar]]],
+    learned_char: list[list[list[cp_model.IntVar]]],
+    num_learned: list[list[cp_model.IntVar]],
+    registers_as_evil: list[list[cp_model.IntVar]],
+    abnormal_ability: list[list[cp_model.IntVar]],
     droisoned: list[list[cp_model.IntVar]],
+    vortoxed: list[list[cp_model.IntVar]],
+    n: int,
+    executed_indexes: list[int]
+    ):
+    if n % 2:
+        return
+    
+    for p in range(player_count):
+        p_targeted = model.new_bool_var(f"{p}_targeted_{n}")
+        model.add_max_equality(
+            p_targeted,
+            target[n][p]
+        )
+        p_char_index_learned = model.new_int_var(-1, len(clocktower.character_list), f"{p}_character_index_learned_{n}")
+        for i, learned_char_bool in enumerate(learned_char[n][p]):
+            model.add(p_char_index_learned == i).only_enforce_if(learned_char_bool)
+            model.add(p_char_index_learned != i).only_enforce_if(learned_char_bool.Not())
+                
+        for j, c in enumerate(clocktower.character_list):
+            if isinstance(c.targets, bool):
+                c_targets = c.targets
+            else:
+                c_targets: cp_model.IntVar | bool = c.targets(
+                    model=model,
+                    executed_indexes=executed_indexes,
+                    n=n,
+                )
+            model.add(p_targeted == c_targets).only_enforce_if(assigned_char[n][p][j])
+            if isinstance(c.char_index_learned, int):
+                c_char_index_learned = -1
+            else:
+                c_char_index_learned: cp_model.IntVar = c.char_index_learned(
+                    model=model,
+                    character_list=clocktower.character_list,
+                    assigned_char=assigned_char,
+                    learned_char=learned_char,
+                    executed_indexes=executed_indexes,
+                    droisoned=droisoned,
+                    vortoxed=vortoxed,
+                    n=n,
+                    player_index=p,
+                )
+            model.add(p_char_index_learned == c_char_index_learned).only_enforce_if(assigned_char[n][p][j])
+            if isinstance(c.number_learned, int):
+                c_number_learned = c.number_learned
+            else:
+                c_number_learned: cp_model.IntVar = c.number_learned(
+                    model=model,
+                    player_list=clocktower.players,
+                    character_list=clocktower.character_list,
+                    assigned_char=assigned_char,
+                    registers_as_evil=registers_as_evil,
+                    abnormal_ability=abnormal_ability,
+                    executed_indexes=executed_indexes,
+                    droisoned=droisoned,
+                    vortoxed=vortoxed,
+                    n=n,
+                    player_index=p,
+                )
+            model.add(num_learned[n][p] == c_number_learned).only_enforce_if(assigned_char[n][p][j])
+
+
+
+def set_vortoxed(
+    clocktower: "QuantumClocktower",
+    model: cp_model.CpModel,
+    player_count: int,
+    assigned_char: list[list[list[cp_model.IntVar]]],
+    tokens: list[list[list[cp_model.IntVar]]],
+    droisoned: list[list[cp_model.IntVar]],
+    vortoxed: list[list[cp_model.IntVar]],
     n: int
     ):
     sober_vortox_exists = model.new_bool_var(f"sober_vortox_exists_{n}")
@@ -275,20 +355,33 @@ def make_sober_vortox_exists(
         for p in range(player_count):
             p_is_sober_vortox = model.new_bool_var(f"{p}_is_sober_vortox_{n}")
             model.add_min_equality(
-                    p_is_sober_vortox,
-                    [
-                        assigned_char[n][p][vortox_index],
-                        droisoned[n][p].Not()
-                    ]
-                )
+                p_is_sober_vortox,
+                [
+                    assigned_char[n][p][vortox_index],
+                    droisoned[n][p].Not()
+                ]
+            )
             matches.append(p_is_sober_vortox)
         model.add_max_equality(
-                sober_vortox_exists,
-                matches
-            )
+            sober_vortox_exists,
+            matches
+        )
     else:
         model.add(sober_vortox_exists == 0)
-    return sober_vortox_exists
+    
+    demon_safe_token_indexes = [
+        i
+        for i, t in enumerate(clocktower.token_list)
+        if t.name in demon_safe_token_names
+    ]
+    model.add_min_equality(
+        vortoxed[n][p],
+        [sober_vortox_exists]
+        + [
+            tokens[n][p][t].Not()
+            for t in demon_safe_token_indexes
+        ]
+    )
 
 
 

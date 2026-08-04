@@ -102,8 +102,11 @@ class QuantumClocktower(Tk):
 
         model, _ = create_model(self, self.night, False, self.seat_menu.player, chosen_player, character_learned_index, chosen_bluff_indexes, number_learned)
         solver = cp_model.CpSolver()
+        # solver.parameters.log_search_progress = True
+        # TODO: test these at different model sizes
+        # solver.parameters.linearization_level = 0
+        solver.parameters.symmetry_level = 0 # NOTE: ~20x faster in some cases
         if solver.solve(model) in (cp_model.FEASIBLE, cp_model.OPTIMAL):
-            # TODO: make game end partway through night
             self.all_night_choices[-1][self.players.index(self.seat_menu.player)] = (
                 chosen_player, character_learned_index, number_learned 
             )
