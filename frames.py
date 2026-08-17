@@ -1,8 +1,17 @@
-from tkinter import Frame, Entry, Listbox, StringVar, Button, Label
+from tkinter import Frame, Entry, Listbox, StringVar, Button, Label, Canvas
 from tkinter.ttk import Combobox
 from math import sin, cos, pi
 
+from typing import TYPE_CHECKING
+
 from chars import Player
+
+if TYPE_CHECKING:
+    from root import QuantumClocktower
+
+
+SHROUD_WIDTH = 40
+SHROUD_HEIGHT = SHROUD_WIDTH * 1.4
 
 
 class NightActionFrame(Frame):
@@ -38,6 +47,24 @@ class NightActionFrame(Frame):
         self.info_type.grid(row=3, sticky="n")
 
         self.clear_specific_info()
+        
+        self.barber_swap_label = Label(self, text="Barber Swapped Players")
+        self.barber_swap_label.grid(row=4)
+        
+        self.first_barber_swapped_player_box = Combobox(
+            self,
+            state="readonly",
+            values=["None"] + [p.name for p in self.master.master.players]
+        )
+        self.first_barber_swapped_player_box.set("None")
+        self.first_barber_swapped_player_box.grid(row=5, column=0)
+        self.second_barber_swapped_player_box = Combobox(
+            self,
+            state="readonly",
+            values=["None"] + [p.name for p in self.master.master.players]
+        )
+        self.second_barber_swapped_player_box.set("None")
+        self.second_barber_swapped_player_box.grid(row=5, column=1)
 
     def show_specific_info(self, info_type) -> None:
         if self.specific_info_box is not None:
@@ -99,25 +126,76 @@ class NightActionFrame(Frame):
         self.specific_info_box = None
 
     def get_action_info(self) -> tuple:
-        return self.chosen_player_box.get(), self.info_type.get()
+        return (
+            self.chosen_player_box.get(),
+            self.info_type.get(),
+            (self.first_barber_swapped_player_box.get(), self.second_barber_swapped_player_box.get())
+        )
+
+
+class DayActionFrame(Frame):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+        self.pack(anchor="w", padx=30, pady=15)
+        
+        self.puzzlemaster_guess_label = Label(self, text="Puzzlemaster Guess")
+        self.puzzlemaster_guess_label.grid(row=0)
+        
+        self.puzzlemaster_guess_box = Combobox(
+            self,
+            state="readonly",
+            values=["None"] + [p.name for p in self.master.master.players],  # type: ignore
+        )
+        self.puzzlemaster_guess_box.set("None")
+        self.puzzlemaster_guess_box.grid(row=1)
+        
+        self.puzzlemaster_demon_learned_label = Label(self, text="Puzzlemaster - Demon Learned")
+        self.puzzlemaster_demon_learned_label.grid(row=2)
+        
+        self.puzzlemaster_demon_learned_box = Combobox(
+            self,
+            state="readonly",
+            values=["None"] + [p.name for p in self.master.master.players],  # type: ignore
+        )
+        self.puzzlemaster_demon_learned_box.set("None")
+        self.puzzlemaster_demon_learned_box.grid(row=3)
+        
+        self.damsel_guess_label = Label(self, text="Damsel Guess")
+        self.damsel_guess_label.grid(row=5)
+        
+        self.damsel_guess_box = Combobox(
+            self,
+            state="readonly",
+            values=["None"] + [p.name for p in self.master.master.players],  # type: ignore
+        )
+        self.damsel_guess_box.set("None")
+        self.damsel_guess_box.grid(row=6)
+        
+    def get_action_info(self) -> tuple:
+        return (
+            self.puzzlemaster_guess_box.get(),
+            self.puzzlemaster_demon_learned_box.get(),
+            self.damsel_guess_box.get()
+        )
 
 
 class NightControlFrame(Frame):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.pack(anchor="ne")
+    def __init__(self, master, clocktower: "QuantumClocktower", *args, **kwargs) -> None:
+        super().__init__(master, *args, **kwargs)
+        self.grid(row=0, column=0, sticky="e")
 
         self.start_night_button = Button(
             self,
             text="Start Night",
-            command=self.master.start_night,  # type: ignore
+            command=clocktower.end_day,
         )
         self.start_night_button.grid(row=0)
 
         self.end_night_button = Button(
             self,
             text="End Night",
-            command=self.master.end_night_or_day,  # type: ignore
+            command=clocktower.end_night,
             state="disabled",
         )
         self.end_night_button.grid(row=1)
@@ -142,7 +220,7 @@ class NightControlFrame(Frame):
 class ExecutionFrame(Frame):
     def __init__(self, master, *args, **kwargs) -> None:
         super().__init__(master, *args, **kwargs)
-        self.pack(side="right", anchor="n", padx=15, pady=15)
+        self.grid(row=1, column=0, padx=15, pady=15, sticky="e")
 
         self.execution_label = Label(self, text="Player Executed")
         self.execution_label.grid(row=0)
@@ -155,8 +233,11 @@ class ExecutionFrame(Frame):
         return self.executee_selector.get()
 
     def set_enabled(self, enabled: bool) -> None:
-        self.executee_selector.config(state="normal" if enabled else "disabled")
-        self.executee_selector.set("")
+        if enabled:
+            self.executee_selector.config(state="readonly")
+            self.executee_selector.set("")
+        else:
+            self.executee_selector.config(state="disabled")
 
 
 class SeatFrame(Frame):
@@ -195,3 +276,51 @@ class SeatFrame(Frame):
             disabledbackground="#E0E0E0",
         )
         self.seat_name.grid(row=1)
+    
+    def add_shroud(self):
+        self._shroud = Canvas(self, width=SHROUD_WIDTH, height=SHROUD_HEIGHT, bd=0, highlightthickness=0)
+        self._shroud.create_polygon(
+            0, 0,
+            0, SHROUD_HEIGHT,
+            SHROUD_WIDTH/2, SHROUD_HEIGHT*0.75,
+            SHROUD_WIDTH, SHROUD_HEIGHT,
+            SHROUD_WIDTH, 0,
+            fill="black",
+            outline="black",
+        )
+        self._shroud.grid(row=0)
+
+
+class UtilityButtonsFrame(Frame):
+    def __init__(self, master, clocktower: "QuantumClocktower", *args, **kwargs) -> None:
+        super().__init__(master, *args, **kwargs)
+        self.pack(side="left", anchor="nw")
+        
+        self.toggle_alignment_button = Button(
+            self,
+            text="Toggle Alignments",
+            command=clocktower.toggle_alignments,
+            state="disabled"
+        )
+        self.toggle_alignment_button.grid(row=0)
+        
+        self.recalcute_possible_characters_button = Button(
+            self,
+            text="Recalculate Possible Characters",
+            command=clocktower.determine_possible_variables,
+            state="disabled",
+        )
+        self.recalcute_possible_characters_button.grid(row=1)
+    
+    def enable_buttons(self) -> None:
+        self.toggle_alignment_button.config(state="normal")
+        self.recalcute_possible_characters_button.config(state="normal")
+
+
+class RightMainButtonsFrame(Frame):
+    def __init__(self, clocktower: "QuantumClocktower", *args, **kwargs):
+        super().__init__(master=clocktower, *args, **kwargs)
+        self.pack(side="right", anchor="ne")
+        
+        self.night_control = NightControlFrame(self, clocktower)
+        self.execution = ExecutionFrame(self)

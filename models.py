@@ -1,4 +1,4 @@
-from chars import Player, get_character, evil_alignment_token_names, evil_registration_token_names, initial_extra_demon_token_names, character_change_token_names, demon_safe_token_names, winning_token_names, losing_token_names
+from chars import Player, get_character, evil_alignment_token_names, evil_registration_token_names, initial_extra_demon_token_names, character_change_token_names, demon_safe_token_names, winning_token_names, losing_token_names, evil_winning_token_names
 from ortools.sat.python import cp_model
 
 from typing import TYPE_CHECKING
@@ -18,6 +18,10 @@ def create_model(
     character_learned_index: int | None = None,
     chosen_bluff_indexes: tuple | None = None,
     number_learned: int | None = None,
+    barber_swapped_player_indexes: list | None = None,
+    puzzlemaster_guess_index: int | None = None,
+    puzzlemaster_demon_player_learned_index: int | None = None,
+    damsel_guess_index: int | None = None,
 ):
     """Returns (model, variables)
     
@@ -37,22 +41,27 @@ def create_model(
         now = 2*(night-1)
     
     assigned_char: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
-    target: list[list[list]] = [[] for _ in range(now+1)]
+    target: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
     learned_char: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
-    num_learned: list[list] = [[] for _ in range(now+1)]
-    tokens: list[list[list]] = [[] for _ in range(now+1)]
-    is_evil: list[list] = [[] for _ in range(now+1)]
-    registers_as_evil: list[list] = [[] for _ in range(now+1)]
-    remembered_tokens: list[list[list]] = [[] for _ in range(now+1)] # only used for stuff like faux paw
-    mad_char: list[list[list]] = [[] for _ in range(now+1)]
-    abnormal_ability: list[list] = [[] for _ in range(now+1)] # for mathematician
+    num_learned: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
+    tokens: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
+    is_evil: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
+    registers_as_evil: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
+    remembered_tokens: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)] # mainly used for stuff like faux paw
+    mad_char: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
+    abnormal_ability: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)] # for mathematician
+    barber_swap_indexes: list[list[tuple[cp_model.IntVar]]] = [[] for _ in range(now+1)]
     droisoned: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
-    vortoxed: list[list] = [[] for _ in range(now+1)]
-    good_wins = []
-    evil_wins = []
-    game_ended = []
+    vortoxed: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
+    puzzlemaster_guess: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
+    puzzlemaster_demon_learned: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
+    damsel_guess: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
+    damsel_guess_order: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
+    good_wins: list[cp_model.IntVar] = []
+    evil_wins: list[cp_model.IntVar] = []
+    game_ended: list[cp_model.IntVar] = []
     
-    # Night and Day Constraints
+
     for n in range(now+1):
         for p in range(player_count):
             assigned_char[n].append([])
@@ -61,19 +70,32 @@ def create_model(
             tokens[n].append([])
             remembered_tokens[n].append([])
             mad_char[n].append([])
+            puzzlemaster_guess[n].append([])
+            puzzlemaster_demon_learned[n].append([])
+            damsel_guess[n].append([])
             for c in range(len(clocktower.character_list)):
                 assigned_char[n][p].append(model.new_bool_var(f"assigned_char_{n}_{p}_{c}"))
                 learned_char[n][p].append(model.new_bool_var(f"character_learned_{n}_{p}_{c}"))
                 mad_char[n][p].append(model.new_bool_var(f"mad_char_{n}_{p}_{c}"))
             for q in range(player_count):
                 target[n][p].append(model.new_bool_var(f"target_{n}_{p}_{q}"))
+                puzzlemaster_guess[n][p].append(model.new_bool_var(f"puzzlemaster_guess_{n}_{p}_{q}"))
+                puzzlemaster_demon_learned[n][p].append(model.new_bool_var(f"puzzlemaster_demon_learned_{n}_{p}_{q}"))
+                damsel_guess[n][p].append(model.new_bool_var(f"damsel_guess_{n}_{p}_{q}"))
             for t in range(len(clocktower.token_list)):
                 tokens[n][p].append(model.new_bool_var(f"token_{n}_{p}_{t}"))
                 remembered_tokens[n][p].append(model.new_bool_var(f"remembered_token_{n}_{p}_{t}"))
-            num_learned[n].append(model.new_int_var(-1, 15, f"num_learned_{n}_{p}"))
+            num_learned[n].append(model.new_int_var(-1, player_count, f"num_learned_{n}_{p}"))
             abnormal_ability[n].append(model.new_bool_var(f"abnormal_ability_{n}_{p}"))
             droisoned[n].append(model.new_bool_var(f"{p}_is_droisoned_{n}"))
             vortoxed[n].append(model.new_bool_var(f"{p}_is_vortoxed_{n}"))
+            barber_swap_indexes[n].append(
+                (
+                    model.new_int_var(-1, player_count-1, f"barber_swap_index_{n}_{p}_1"),
+                    model.new_int_var(-1, player_count-1, f"barber_swap_index_{n}_{p}_2")
+                )
+            )
+            damsel_guess_order[n].append(model.new_int_var(0, player_count-1, f"damsel_guess_order_{n}_{p}"))
             
         set_is_evil(clocktower, model, player_count, assigned_char, tokens, is_evil, n)
         for p in range(player_count):
@@ -93,28 +115,7 @@ def create_model(
             )
         set_droisoning(clocktower, model, player_count, tokens, droisoned, n)
         set_vortoxed(clocktower, model, player_count, assigned_char, tokens, droisoned, vortoxed, n)
-        
-        # one character per person, max one target, max one character learned
-        for p in range(player_count):
-            model.add(sum(assigned_char[n][p]) == 1)
-            model.add(sum(target[n][p]) <= 1)
-            model.add(sum(learned_char[n][p]) <= 1)
-
-        
-        executed_indexes = ( # TODO: change this to retain
-            None
-            if clocktower.execution.executee_name == "None" or not n % 2
-            else [p.name for p in clocktower.players].index(clocktower.execution.executee_name)
-        )
-        
-        
-        
-        
-        
-        
-
-
-
+        set_barber_swap_indexes(clocktower, model, player_count, assigned_char, tokens, barber_swap_indexes, n)
         set_night_info_restrictions(
             clocktower,
             model,
@@ -123,17 +124,38 @@ def create_model(
             target,
             learned_char,
             num_learned,
+            tokens,
+            is_evil,
             registers_as_evil,
             abnormal_ability,
             droisoned,
             vortoxed,
             n,
-            executed_indexes
         )
+        set_damsel_guess_order(clocktower, model, player_count, damsel_guess, damsel_guess_order, n)
+        set_puzzlemaster_guess_restrictions(
+            clocktower,
+            model,
+            player_count,
+            assigned_char,
+            tokens,
+            droisoned,
+            puzzlemaster_guess,
+            puzzlemaster_demon_learned,
+            n,
+        )
+        
+        
+        
+        for p in range(player_count):
+            model.add_exactly_one(assigned_char[n][p])
+            
+            model.add_at_most_one(target[n][p])
+            model.add_at_most_one(learned_char[n][p])
+            model.add_at_most_one(puzzlemaster_guess[n][p])
+            model.add_at_most_one(puzzlemaster_demon_learned[n][p])
+            model.add_at_most_one(damsel_guess[n][p])
 
-        
-        
-        
         if "atheist" in [c.name for c in clocktower.character_list]:
             atheist_index = [c.name for c in clocktower.character_list].index("atheist")
             model.add(
@@ -158,12 +180,16 @@ def create_model(
                     num_learned=num_learned,
                     is_evil=is_evil,
                     registers_as_evil=registers_as_evil,
-                    executed_indexes=executed_indexes,
+                    executed_indexes=clocktower.executed_indexes,
                     remembered_tokens=remembered_tokens,
                     mad_char=mad_char,
                     abnormal_ability=abnormal_ability,
+                    barber_swap_indexes=barber_swap_indexes,
                     droisoned=droisoned,
                     vortoxed=vortoxed,
+                    puzzlemaster_guess=puzzlemaster_guess,
+                    damsel_guess=damsel_guess,
+                    damsel_guess_order=damsel_guess_order,
                 )
 
         keep_character_across_nights(clocktower, model, player_count, assigned_char, tokens, n)
@@ -180,52 +206,100 @@ def create_model(
             game_ended,
             n
         )
-        model.add( #TODO change?
-            sum(game_ended[:-1]) == 0
-        )
         
-        for p, choices in enumerate(clocktower.all_night_choices[n]):
-            if not choices or (n == now and p == player_making_choice_index):
-                continue
-            old_chosen_player, old_character_learned_index, old_number_learned = choices
-            if old_chosen_player is None:
-                model.add(
-                    sum(target[n][p]) == 0
-                )
-            else:
-                model.add(
-                    target[n][p][clocktower.players.index(old_chosen_player)] == 1
-                )
-            if old_character_learned_index is None:
-                model.add(
-                    sum(learned_char[n][p]) == 0
-                )
-            else:
-                model.add(
-                    learned_char[n][p][old_character_learned_index] == 1
-                )
-            if old_number_learned is None:
-                model.add(
-                    num_learned[n][p] == -1
-                )
-            else:
-                model.add(
-                    num_learned[n][p] == old_number_learned
-                )
+        if not n % 2:
+            for p, choices in enumerate(clocktower.all_night_choices[n]):
+                if not choices or (n == now and p == player_making_choice_index):
+                    continue
+                old_chosen_player, old_character_learned_index, old_number_learned, old_barber_swapped_player_indexes = choices
+                if old_chosen_player is None:
+                    model.add(
+                        sum(target[n][p]) == 0
+                    )
+                else:
+                    model.add(
+                        target[n][p][clocktower.players.index(old_chosen_player)] == 1
+                    )
+                if old_character_learned_index is None:
+                    model.add(
+                        sum(learned_char[n][p]) == 0
+                    )
+                else:
+                    model.add(
+                        learned_char[n][p][old_character_learned_index] == 1
+                    )
+                if old_number_learned is None:
+                    model.add(
+                        num_learned[n][p] == -1
+                    )
+                else:
+                    model.add(
+                        num_learned[n][p] == old_number_learned
+                    )
+                if old_barber_swapped_player_indexes is None:
+                    model.add(
+                        barber_swap_indexes[n][p][0] == -1
+                    )
+                    model.add(
+                        barber_swap_indexes[n][p][1] == -1
+                    )
+                else:
+                    model.add(
+                        barber_swap_indexes[n][p][0] == old_barber_swapped_player_indexes[0]
+                    )
+                    model.add(
+                        barber_swap_indexes[n][p][1] == old_barber_swapped_player_indexes[1]
+                    )
+        else:
+            for p in range(player_count):
+                for q in range(player_count):
+                    model.add(target[n][p][q] == 0)
+                for c in range(len(clocktower.character_list)):
+                    model.add(learned_char[n][p][c] == 0)
+                model.add(num_learned[n][p] == -1)
+                model.add(barber_swap_indexes[n][p][0] == -1)
+                model.add(barber_swap_indexes[n][p][1] == -1)
+        if n % 2:
+            for p, choices in enumerate(clocktower.all_day_choices[n][0]): # NOTE: new day actions override previous ones
+                if not choices or (n == now and p == player_making_choice_index):
+                    continue
+                old_puzzlemaster_guess_index, old_puzzlemaster_demon_player_learned_index, old_damsel_guess_index = choices
+
+                if old_puzzlemaster_guess_index is None:
+                    for q in range(player_count):
+                        model.add(puzzlemaster_guess[n][p][q] == 0)
+                else:
+                    model.add(puzzlemaster_guess[n][p][old_puzzlemaster_guess_index] == 1)
+                
+                if old_puzzlemaster_demon_player_learned_index is None:
+                    for q in range(player_count):
+                        model.add(puzzlemaster_demon_learned[n][p][q] == 0)
+                else:
+                    model.add(puzzlemaster_demon_learned[n][p][old_puzzlemaster_demon_player_learned_index] == 1)
+                
+                if old_damsel_guess_index is None:
+                    for q in range(player_count):
+                        model.add(damsel_guess[n][p][q] == 0)
+                else:
+                    model.add(damsel_guess[n][p][old_damsel_guess_index] == 1)
+        else:
+            for p in range(player_count):
+                for q in range(player_count):
+                    model.add(puzzlemaster_guess[n][p][q] == 0)
+                    model.add(puzzlemaster_demon_learned[n][p][q] == 0)
+                    model.add(damsel_guess[n][p][q] == 0)
     
-    # Setup constraints:
+    model.add(sum(game_ended[:-1]) == 0) #TODO change?
     set_demons(clocktower, model, player_count, assigned_char, tokens)
     set_outsiders(clocktower, model, player_count, assigned_char)
-    # apply possible characters (due to alignment)
     for i, p in enumerate(clocktower.players):
         for j, c in enumerate(clocktower.character_list):
-            if c not in p.possible_characters:
+            if c not in p.possible_starting_characters: # TODO would using p.possible_characters speed up solving?
                 model.add(assigned_char[0][i][j] == 0)
     # characters used at most once
     for c in range(len(clocktower.character_list)):
         model.add(sum(assigned_char[0][p][c] for p in range(player_count)) <= 1)
-    # TODO: replace with is_the_alchemist token? (if using a script with alchemsit)
-    # at most one alchemist
+    # at most one alchemist # NOTE: outdated
     alchemist_indexes = [
         j
         for j, c in enumerate(clocktower.character_list)
@@ -238,31 +312,274 @@ def create_model(
     )
     
     if player_making_choice is not None:
-        if chosen_player is None:
-            model.add(sum(target[now][player_making_choice_index]) == 0)
-        else:
-            model.add(
-                target[now][player_making_choice_index][
-                    clocktower.players.index(chosen_player)
-                ] == 1
-            )
-        if character_learned_index is None:
-            model.add(sum(learned_char[now][player_making_choice_index]) == 0)
-        else:
-            model.add(
-                learned_char[now][player_making_choice_index][
-                    character_learned_index
-                ] == 1
-            )
-        if number_learned is None:
-            model.add(num_learned[now][player_making_choice_index] == -1)
-        else:
-            model.add(num_learned[now][player_making_choice_index] == number_learned)
+        set_this_night_choice(
+            clocktower,
+            chosen_player,
+            character_learned_index,
+            number_learned,
+            barber_swapped_player_indexes,
+            model,
+            player_making_choice_index,
+            now,
+            target,
+            learned_char,
+            num_learned,
+            barber_swap_indexes,
+        )
+        set_this_day_choice(
+            puzzlemaster_guess_index,
+            puzzlemaster_demon_player_learned_index,
+            damsel_guess_index,
+            model,
+            player_count,
+            player_making_choice_index,
+            puzzlemaster_guess,
+            puzzlemaster_demon_learned,
+            damsel_guess,
+            now,
+        )
     
-    set_bluffs(clocktower, model, player_count, player_making_choice_index, chosen_bluff_indexes, assigned_char, n)
+    set_bluffs(clocktower, model, player_count, player_making_choice_index, chosen_bluff_indexes, assigned_char, now)
 
     variables = assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended
     return model, variables
+
+
+
+def set_damsel_guess_order(
+    clocktower: "QuantumClocktower",
+    model: cp_model.CpModel,
+    player_count: int,
+    damsel_guess: list[list[list[cp_model.IntVar]]],
+    damsel_guess_order: list[list[cp_model.IntVar]],
+    n: int,
+):
+    if not n % 2:
+        return
+    for p in range(player_count):
+        for i, damsel_guessing_player_index in enumerate(clocktower.all_day_choices[n][1]):
+            if p == damsel_guessing_player_index:
+                model.add(damsel_guess_order[n][p] == i)
+                break
+        else:
+            p_damsel_guessed = model.new_bool_var(f"{p}_damsel_guessed_{n}")
+            model.add(p_damsel_guessed == sum(damsel_guess[n][p]))
+            model.add(
+                damsel_guess_order[n][p]
+                == len(clocktower.all_day_choices[n][1])
+            ).only_enforce_if(p_damsel_guessed)
+    model.add_all_different(damsel_guess_order[n])
+
+
+
+def set_puzzlemaster_guess_restrictions(
+    clocktower: "QuantumClocktower",
+    model: cp_model.CpModel,
+    player_count: int,
+    assigned_char: list[list[list[cp_model.IntVar]]],
+    tokens: list[list[list[cp_model.IntVar]]],
+    droisoned: list[list[cp_model.IntVar]],
+    puzzlemaster_guess: list[list[list[cp_model.IntVar]]],
+    puzzlemaster_demon_learned: list[list[list[cp_model.IntVar]]],
+    n: int,
+):
+    puzzlemaster_index = [c.name for c in clocktower.character_list].index("puzzlemaster")
+    puzzledrunk_token_index = [t.name for t in clocktower.token_list].index("puzzledrunk")
+    puzzlemaster_guess_used_token_index = [t.name for t in clocktower.token_list].index("puzzlemaster_guess_used")
+    
+    if not n % 2: # probably makes presolving faster
+        for p in range(player_count):
+            model.add(sum(puzzlemaster_guess[n][p]) == 0)
+            model.add(sum(puzzlemaster_demon_learned[n][p]) == 0)
+        return
+    
+    for p in range(player_count):
+        model.add(sum(puzzlemaster_guess[n][p]) == sum(puzzlemaster_demon_learned[n][p]))
+        model.add(sum(puzzlemaster_guess[n][p]) == 0).only_enforce_if(assigned_char[n][p][puzzlemaster_index].Not())
+        model.add(sum(puzzlemaster_guess[n][p]) == 0).only_enforce_if(tokens[n][p][puzzlemaster_guess_used_token_index])
+        
+        p_puzzle_guessed = model.new_bool_var(f"{p}_puzzle_guessed_{n}")
+        model.add(p_puzzle_guessed == sum(puzzlemaster_guess[n][p]))
+        
+        p_puzzle_guessed_correctly = model.new_bool_var(f"{p}_puzzle_guessed_correctly_{n}")
+        guess_causes = []
+        for q in range(player_count):
+            p_puzzle_guessed_q_correctly = model.new_bool_var(f"{p}_puzzle_guessed_{q}_correctly_{n}")
+            model.add_min_equality(
+                p_puzzle_guessed_q_correctly,
+                [
+                    puzzlemaster_guess[n][p][q],
+                    tokens[n][q][puzzledrunk_token_index]
+                ]
+            )
+            guess_causes.append(p_puzzle_guessed_q_correctly)
+        model.add_max_equality(p_puzzle_guessed_correctly, guess_causes)
+        
+        p_learned_demon = model.new_bool_var(f"{p}_puzzlemaster_learned_demon_{n}")
+        learned_demon_causes = []
+        for q in range(player_count):
+            p_learned_q_demon = model.new_bool_var(f"{p}_puzzlemaster_learned_{q}_demon_{n}")
+            q_is_demon = model.new_bool_var(f"puzzlemaster_guess_{q}_is_demon_{n}")
+            model.add_max_equality(
+                q_is_demon,
+                [
+                    assigned_char[n][q][j]
+                    for j, c in enumerate(clocktower.character_list)
+                    if c.character_type == "demon"
+                ]
+            )
+            model.add_min_equality(
+                p_learned_q_demon,
+                [
+                    puzzlemaster_demon_learned[n][p][q],
+                    q_is_demon
+                ]
+            )
+            learned_demon_causes.append(p_learned_q_demon)
+        model.add_max_equality(p_learned_demon, learned_demon_causes)
+        
+        model.add(
+            p_puzzle_guessed_correctly == p_learned_demon
+        ).only_enforce_if(droisoned[n][p].Not()).only_enforce_if(p_puzzle_guessed)
+
+
+
+def set_this_day_choice(
+    puzzlemaster_guess_index: int | None,
+    puzzlemaster_demon_player_learned_index: int | None,
+    damsel_guess_index: int | None,
+    model: cp_model.CpModel,
+    player_count: int,
+    player_making_choice_index: int,
+    puzzlemaster_guess: list[list[list[cp_model.IntVar]]],
+    puzzlemaster_demon_learned: list[list[list[cp_model.IntVar]]],
+    damsel_guess: list[list[list[cp_model.IntVar]]],
+    now: int,
+):
+    if puzzlemaster_guess_index is None:
+        for q in range(player_count):
+            model.add(puzzlemaster_guess[now][player_making_choice_index][q] == 0)
+    else:
+        model.add(puzzlemaster_guess[now][player_making_choice_index][puzzlemaster_guess_index] == 1)
+        
+    if puzzlemaster_demon_player_learned_index is None:
+        for q in range(player_count):
+            model.add(puzzlemaster_demon_learned[now][player_making_choice_index][q] == 0)
+    else:
+        model.add(puzzlemaster_demon_learned[now][player_making_choice_index][
+            puzzlemaster_demon_player_learned_index
+            ] == 1
+        )
+        
+    if damsel_guess_index is None:
+        for q in range(player_count):
+            model.add(damsel_guess[now][player_making_choice_index][q] == 0)
+    else:
+        model.add(damsel_guess[now][player_making_choice_index][damsel_guess_index] == 1)
+
+
+
+def set_this_night_choice(
+    clocktower: "QuantumClocktower",
+    chosen_player: Player,
+    character_learned_index: int | None,
+    number_learned: int | None,
+    barber_swapped_player_indexes: list | None,
+    model: cp_model.CpModel,
+    player_making_choice_index: int | None,
+    now: int,
+    target: list[list[list[cp_model.IntVar]]],
+    learned_char: list[list[list[cp_model.IntVar]]],
+    num_learned: list[list[cp_model.IntVar]],
+    barber_swap_indexes: list[list[tuple[cp_model.IntVar]]],
+):
+    if chosen_player is None:
+        model.add(sum(target[now][player_making_choice_index]) == 0)
+    else:
+        model.add(
+            target[now][player_making_choice_index][
+                clocktower.players.index(chosen_player)
+            ] == 1
+        )
+    if character_learned_index is None:
+        model.add(sum(learned_char[now][player_making_choice_index]) == 0)
+    else:
+        model.add(
+            learned_char[now][player_making_choice_index][
+                character_learned_index
+            ] == 1
+        )
+    if number_learned is None:
+        model.add(num_learned[now][player_making_choice_index] == -1)
+    else:
+        model.add(num_learned[now][player_making_choice_index] == number_learned)
+    if barber_swapped_player_indexes is None:
+        model.add(barber_swap_indexes[now][player_making_choice_index][0] == -1)
+        model.add(barber_swap_indexes[now][player_making_choice_index][1] == -1)
+    else:
+        model.add(barber_swap_indexes[now][player_making_choice_index][0] == barber_swapped_player_indexes[0])
+        model.add(barber_swap_indexes[now][player_making_choice_index][1] == barber_swapped_player_indexes[1])
+
+
+# NOTE: barber swap happens on the next day (equivalent to the end of the night).
+# NOTE: Allows swapping other demons (fix if using imp, etc)
+def set_barber_swap_indexes(
+    clocktower: "QuantumClocktower",
+    model: cp_model.CpModel,
+    player_count: int,
+    assigned_char: list[list[list[cp_model.IntVar]]],
+    tokens: list[list[list[cp_model.IntVar]]],
+    barber_swap_indexes: list[list[tuple[cp_model.IntVar]]],
+    n: int,
+):
+    if "barber" in [c.name for c in clocktower.character_list] and not n % 2:
+        haircuts_tonight_token_index = [t.name for t in clocktower.token_list].index("haircuts_tonight")
+        haircuts_tonight = model.new_bool_var(f"haircuts_tonight_{n}")
+        model.add_max_equality(
+            haircuts_tonight,
+            [
+                tokens[n][p][haircuts_tonight_token_index]
+                for p in range(player_count)
+            ]
+        )
+        for p in range(player_count):
+            p_is_demon_before_swap = model.new_bool_var(f"{p}_is_demon_before_barber_swap_{n}")
+            model.add_max_equality(
+                p_is_demon_before_swap,
+                [
+                    assigned_char[n][p][j]
+                    for j, c in enumerate(clocktower.character_list)
+                    if c.character_type == "demon"
+                ]
+            )
+            
+            p_makes_barber_swap = model.new_bool_var(f"{p}_makes_barber_swap_{n}")
+            model.add_min_equality(
+                p_makes_barber_swap,
+                [
+                    p_is_demon_before_swap,
+                    haircuts_tonight
+                ]
+            )
+            
+            barber_swap_indexes_are_equal = model.new_bool_var(f"{p}_barber_swap_indexes_are_equal_{n}")
+            model.add(
+                barber_swap_indexes[n][p][0] == barber_swap_indexes[n][p][1]
+            ).only_enforce_if(barber_swap_indexes_are_equal)
+            model.add(
+                barber_swap_indexes[n][p][0] != barber_swap_indexes[n][p][1]
+            ).only_enforce_if(barber_swap_indexes_are_equal.Not())
+            
+            model.add(
+                barber_swap_indexes[n][p][0] + barber_swap_indexes[n][p][1] == -2
+            ).only_enforce_if(barber_swap_indexes_are_equal)
+            model.add(barber_swap_indexes_are_equal == p_makes_barber_swap.Not())
+    else:
+        for p in range(player_count):
+            model.add(barber_swap_indexes[n][p][0] == -1)
+            model.add(barber_swap_indexes[n][p][1] == -1)
+
+
 
 def set_night_info_restrictions(
     clocktower: "QuantumClocktower",
@@ -272,12 +589,13 @@ def set_night_info_restrictions(
     target: list[list[list[cp_model.IntVar]]],
     learned_char: list[list[list[cp_model.IntVar]]],
     num_learned: list[list[cp_model.IntVar]],
+    tokens: list[list[list[cp_model.IntVar]]],
+    is_evil: list[list[cp_model.IntVar]],
     registers_as_evil: list[list[cp_model.IntVar]],
     abnormal_ability: list[list[cp_model.IntVar]],
     droisoned: list[list[cp_model.IntVar]],
     vortoxed: list[list[cp_model.IntVar]],
     n: int,
-    executed_indexes: list[int]
     ):
     if n % 2:
         return
@@ -299,7 +617,7 @@ def set_night_info_restrictions(
             else:
                 c_targets: cp_model.IntVar | bool = c.targets(
                     model=model,
-                    executed_indexes=executed_indexes,
+                    executed_indexes=clocktower.executed_indexes,
                     n=n,
                 )
             model.add(p_targeted == c_targets).only_enforce_if(assigned_char[n][p][j])
@@ -311,7 +629,9 @@ def set_night_info_restrictions(
                     character_list=clocktower.character_list,
                     assigned_char=assigned_char,
                     learned_char=learned_char,
-                    executed_indexes=executed_indexes,
+                    tokens=tokens,
+                    token_list=clocktower.token_list,
+                    executed_indexes=clocktower.executed_indexes,
                     droisoned=droisoned,
                     vortoxed=vortoxed,
                     n=n,
@@ -319,16 +639,19 @@ def set_night_info_restrictions(
                 )
             model.add(p_char_index_learned == c_char_index_learned).only_enforce_if(assigned_char[n][p][j])
             if isinstance(c.number_learned, int):
-                c_number_learned = c.number_learned
+                c_number_learned = -1
             else:
                 c_number_learned: cp_model.IntVar = c.number_learned(
                     model=model,
                     player_list=clocktower.players,
                     character_list=clocktower.character_list,
                     assigned_char=assigned_char,
+                    tokens=tokens,
+                    token_list=clocktower.token_list,
+                    is_evil=is_evil,
                     registers_as_evil=registers_as_evil,
                     abnormal_ability=abnormal_ability,
-                    executed_indexes=executed_indexes,
+                    executed_indexes=clocktower.executed_indexes,
                     droisoned=droisoned,
                     vortoxed=vortoxed,
                     n=n,
@@ -374,14 +697,15 @@ def set_vortoxed(
         for i, t in enumerate(clocktower.token_list)
         if t.name in demon_safe_token_names
     ]
-    model.add_min_equality(
-        vortoxed[n][p],
-        [sober_vortox_exists]
-        + [
-            tokens[n][p][t].Not()
-            for t in demon_safe_token_indexes
-        ]
-    )
+    for p in range(player_count):
+        model.add_min_equality(
+            vortoxed[n][p],
+            [sober_vortox_exists]
+            + [
+                tokens[n][p][t].Not()
+                for t in demon_safe_token_indexes
+            ]
+        )
 
 
 
@@ -478,6 +802,11 @@ def victory_conditions( # TODO: implement a "day order" for winning tokens
         for i, t in enumerate(clocktower.token_list)
         if t.name in losing_token_names
     ]
+    evil_winning_token_indexes = [
+        i
+        for i, t in enumerate(clocktower.token_list)
+        if t.name in evil_winning_token_names
+    ]
     
     good_won = model.new_bool_var(f"{n}_good_won")
     good_wins.append(good_won)
@@ -489,16 +818,23 @@ def victory_conditions( # TODO: implement a "day order" for winning tokens
     all_demons_dead = model.new_bool_var(f"{n}_all_demons_dead")
     living_demons = []
     for p in range(player_count):
-        for c in demon_indexes:
-            p_is_living_demon_c = model.new_bool_var(f"{p}_is_living_demon_{c}_{n}")
-            model.add_min_equality(
-                p_is_living_demon_c,
-                [
-                    assigned_char[n][p][c],
-                    tokens[n][p][dead_token_index].Not()
-                ]
-            )
-            living_demons.append(p_is_living_demon_c)
+        p_is_demon = model.new_bool_var(f"{p}_demon_{n}")
+        model.add_max_equality(
+            p_is_demon,
+            [
+                assigned_char[n][p][c]
+                for c in demon_indexes
+            ]
+        )
+        p_is_living_demon = model.new_bool_var(f"{p}_is_living_demon_{n}")
+        model.add_min_equality(
+            p_is_living_demon,
+            [
+                p_is_demon,
+                tokens[n][p][dead_token_index].Not()
+            ]
+        )
+        living_demons.append(p_is_living_demon)
     model.add_max_equality(
         all_demons_dead.Not(),
         living_demons
@@ -519,54 +855,45 @@ def victory_conditions( # TODO: implement a "day order" for winning tokens
     ).only_enforce_if(two_players_alive.Not())
     
     good_win_from_token = model.new_bool_var(f"good_win_from_token_{n}")
-    evil_win_from_token = model.new_bool_var(f"evil_win_drom_token_{n}")
-    good_loss_from_token = model.new_bool_var(f"good_loss_from_token_{n}")
-    evil_loss_from_token = model.new_bool_var(f"evil_loss_from_token_{n}")
+    evil_win_from_token = model.new_bool_var(f"evil_win_from_token_{n}")
     good_win_causes = []
     evil_win_causes = []
-    good_loss_causes = []
-    evil_loss_causes = []
     for p in range(player_count):
-        good_win_cause = model.new_bool_var(f"good_win_cause_{n}")
-        evil_win_cause = model.new_bool_var(f"evil_win_cause_{n}")
-        good_loss_cause = model.new_bool_var(f"good_loss_cause_{n}")
-        evil_loss_cause = model.new_bool_var(f"evil_loss_cause_{n}")
-        model.add_min_equality(
+        good_win_cause = model.new_bool_var(f"good_win_cause_{p}_{n}")
+        model.add_max_equality(
             good_win_cause,
-            [registers_as_evil[n][p].Not()]
-            + [
+            [
                 tokens[n][p][t]
                 for t in winning_token_indexes
             ]
-        )
-        model.add_min_equality(
-            evil_win_cause,
-            [registers_as_evil[n][p]]
-            + [
-                tokens[n][p][t]
-                for t in winning_token_indexes
-            ]
-        )
-        model.add_min_equality(
-            good_loss_cause,
-            [registers_as_evil[n][p].Not()]
-            + [
+        ).only_enforce_if(registers_as_evil[n][p].Not())
+        model.add_max_equality(
+            good_win_cause,
+            [
                 tokens[n][p][t]
                 for t in losing_token_indexes
             ]
-        )
-        model.add_min_equality(
-            evil_loss_cause,
-            [registers_as_evil[n][p]]
-            + [
-                tokens[n][p][t]
-                for t in losing_token_indexes
-            ]
-        )
+        ).only_enforce_if(registers_as_evil[n][p])
         good_win_causes.append(good_win_cause)
+        
+        evil_win_cause = model.new_bool_var(f"evil_win_cause_{p}_{n}")
+        model.add_max_equality(
+            evil_win_cause,
+            [
+                tokens[n][p][t]
+                for t in winning_token_indexes
+                + evil_winning_token_indexes
+            ]
+        ).only_enforce_if(registers_as_evil[n][p])
+        model.add_max_equality(
+            evil_win_cause,
+            [
+                tokens[n][p][t]
+                for t in losing_token_indexes
+                + evil_winning_token_indexes
+            ]
+        ).only_enforce_if(registers_as_evil[n][p].Not())
         evil_win_causes.append(evil_win_cause)
-        good_loss_causes.append(good_loss_cause)
-        evil_loss_causes.append(evil_loss_cause)
     model.add_max_equality(
         good_win_from_token,
         good_win_causes
@@ -575,14 +902,7 @@ def victory_conditions( # TODO: implement a "day order" for winning tokens
         evil_win_from_token,
         evil_win_causes
     )
-    model.add_max_equality(
-        good_loss_from_token,
-        good_loss_causes
-    )
-    model.add_max_equality(
-        evil_loss_from_token,
-        evil_loss_causes
-    )
+    
     
     token_win = model.new_bool_var(f"token_win_{n}")
     model.add_max_equality(
@@ -590,13 +910,11 @@ def victory_conditions( # TODO: implement a "day order" for winning tokens
         [
             good_win_from_token,
             evil_win_from_token,
-            good_loss_from_token,
-            evil_loss_from_token
         ]
     )
 
     mastermind_active = model.new_bool_var(f"mastermind_active_{n}")
-    if "mastermind" in [t.name for t in clocktower.token_list]:
+    if "mastermind" in [t.name for t in clocktower.character_list]:
         mastermind_day_token_index = [t.name for t in clocktower.token_list].index("mastermind_day")
         model.add_max_equality(
             mastermind_active,
@@ -615,12 +933,8 @@ def victory_conditions( # TODO: implement a "day order" for winning tokens
             mastermind_active.Not()
         ]
     ).only_enforce_if(token_win.Not())
-    model.add_max_equality(
-        good_won,
-        [
-            good_win_from_token,
-            evil_loss_from_token
-        ]
+    model.add(
+        good_won == good_win_from_token
     ).only_enforce_if(token_win)
 
     model.add_min_equality(
@@ -631,14 +945,13 @@ def victory_conditions( # TODO: implement a "day order" for winning tokens
             good_won.Not()
         ]
     ).only_enforce_if(token_win.Not())
-    model.add_max_equality(
+    model.add_min_equality(
         evil_won,
         [
             evil_win_from_token,
-            good_loss_from_token
+            good_won.Not()
         ]
-    ).only_enforce_if(token_win).only_enforce_if(good_won.Not())
-    model.add_implication(good_won, evil_won.Not())
+    ).only_enforce_if(token_win)
     
     model.add_max_equality(
         game_end,
@@ -804,11 +1117,11 @@ def set_bluffs(
     player_making_choice_index: int | None,
     chosen_bluff_indexes: tuple | None,
     assigned_char: list[list],
-    n: int,
+    now: int,
     ):
     
     new_all_chosen_bluff_indexes = clocktower.all_chosen_bluff_indexes.copy()
-    if n == 0 and player_making_choice_index is not None:
+    if now == 0 and player_making_choice_index is not None:
         new_all_chosen_bluff_indexes[player_making_choice_index] = chosen_bluff_indexes
     
     learned_bluffs = [

@@ -1,12 +1,12 @@
 from tkinter import Menu, Toplevel, Entry, Listbox, Button
 from tkinter.ttk import Combobox
 
-from frames import NightActionFrame
+from frames import NightActionFrame, DayActionFrame
 from chars import Player
 
 
 class SeatMenu(Menu):
-    NIGHT_PANEL_SIZE = "600x400"
+    NIGHT_AND_DAY_PANEL_SIZE_AND_POSITION = "600x400+500+200"
 
     def __init__(self, master=None, player: Player | None = None, **kwargs):
         kwargs.setdefault("tearoff", 0)
@@ -18,18 +18,22 @@ class SeatMenu(Menu):
             command=self.create_night_action,
         )
         self.add_command(
+            label="Create Day Action",
+            command=self.create_day_action,
+        )
+        self.add_command(
             label="View Possible Characters",
             command=lambda: print(
                 f"Possible characters:\n{[character.name for character in self.player.possible_characters] if self.player else None}"
             ),
         )
 
-    def create_night_action(self) -> None:
+    def create_night_action(self) -> None: # TODO: disable these at relevant times
         self.night_action_window = Toplevel(self.master)
         self.night_action_window.title(
             f"Set Night Action for {self.player.name if self.player else None}"
         )
-        self.night_action_window.geometry(self.NIGHT_PANEL_SIZE)
+        self.night_action_window.geometry(self.NIGHT_AND_DAY_PANEL_SIZE_AND_POSITION)
 
         self.night_action_frame = NightActionFrame(self.night_action_window)
 
@@ -41,10 +45,16 @@ class SeatMenu(Menu):
             ),
         )
         self.night_action_done_button.pack(side="bottom", anchor="e", padx=20, pady=20)
+        self.night_action_window.bind(
+            "<Return>",
+            lambda _: self.execute_night_action(
+                *self.night_action_frame.get_action_info()
+            )
+        )
 
-    def execute_night_action(self, chosen_player, info_type) -> None:
+    def execute_night_action(self, chosen_player, info_type, barber_swapped_player_names) -> None:
         if self.master.execute_night_action(  # type: ignore
-            self.get_final_info(), chosen_player, info_type
+            self.get_final_info(), chosen_player, info_type, barber_swapped_player_names
         ):
             self.night_action_window.destroy()
 
@@ -68,3 +78,33 @@ class SeatMenu(Menu):
                 if len(final_info) != 3 or len(self.master.players) < 7:  # type: ignore
                     final_info = False
         return final_info
+    
+    def create_day_action(self) -> None:
+        self.day_action_window = Toplevel(self.master)
+        self.day_action_window.title(
+            f"Set Day Action for {self.player.name if self.player else None}"
+        )
+        self.day_action_window.geometry(self.NIGHT_AND_DAY_PANEL_SIZE_AND_POSITION)
+        
+        self.day_action_frame = DayActionFrame(self.day_action_window)
+        
+        self.day_action_done_button = Button(
+            self.day_action_window,
+            text="Done",
+            command=lambda: self.execute_day_action(
+                *self.day_action_frame.get_action_info()
+            ),
+        )
+        self.day_action_done_button.pack(side="bottom", anchor="e", padx=20, pady=20)
+        self.day_action_window.bind(
+            "<Return>",
+            lambda _: self.execute_day_action(
+                *self.day_action_frame.get_action_info()
+            ),
+        )
+        
+    def execute_day_action(self, puzzlemaster_guess, puzzlemaster_demon_learned, damsel_guess) -> None:
+        if self.master.execute_day_action(
+            puzzlemaster_guess, puzzlemaster_demon_learned, damsel_guess
+        ):  # type: ignore
+            self.day_action_window.destroy()
