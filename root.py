@@ -183,8 +183,8 @@ class QuantumClocktower(Tk):
         seat_message_parts = []
         if puzzlemaster_guess_index is not None:
             seat_message_parts.append(
-                f"""Puzzle Guessed: {self.players[puzzlemaster_guess_index].name}\n
-                Learned: {self.players[puzzlemaster_demon_player_learned_index].name}"""
+                f"Puzzle Guessed: {self.players[puzzlemaster_guess_index].name}"
+                f"Learned: {self.players[puzzlemaster_demon_player_learned_index].name}"
             )
         if damsel_guess_index is not None:
             seat_message_parts.append(f"Damsel Guessed: {self.players[damsel_guess_index].name}")
@@ -337,6 +337,9 @@ class QuantumClocktower(Tk):
                 ]
                 for c in self.character_list:
                     if keep_previous_impossible_chars and c not in p.night_or_day_start_possible_characters:
+                        continue
+                    if c.name in ("pixie", "cannibal", "drunk"):
+                        chars_to_test.append(c)
                         continue
                     c_info = []
                     if isinstance(c.targets, bool):

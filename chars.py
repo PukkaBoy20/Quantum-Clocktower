@@ -37,6 +37,7 @@ class Character:
         targets,
         char_index_learned,
         number_learned,
+        extra_ability_conditions = None,
     ):
         self.name = name
         self.alignment = alignment
@@ -44,6 +45,7 @@ class Character:
         self.targets = targets
         self.char_index_learned = char_index_learned
         self.number_learned = number_learned
+        self.extra_ability_conditions = extra_ability_conditions
 
 
 class Token:
@@ -352,6 +354,108 @@ def attacking_other_player_token(
 
 
 
+def pixie_extra_ability_condition(
+    model: cp_model.CpModel,
+    player_count: int,
+    has_ability: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    token_list: list[Token] = kwargs["token_list"]
+    tokens: list[list[list[cp_model.IntVar]]] = kwargs["tokens"]
+    pixie_ability_index_learned: list[list[cp_model.IntVar]] = kwargs["pixie_ability_index_learned"]
+    pixie_has_ability_token_index = [t.name for t in token_list].index("pixie_has_ability")
+    
+    for p in range(player_count):
+        model.add_element(
+            pixie_ability_index_learned[n][p], has_ability[n][p], 1
+        ).only_enforce_if(tokens[n][p][pixie_has_ability_token_index])
+
+def cannibal_extra_ability_condition(
+    model: cp_model.CpModel,
+    player_count: int,
+    has_ability: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    character_list: list[Character] = kwargs["character_list"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
+    droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
+    cannibal_current_ability_index: list[cp_model.IntVar] = kwargs["cannibal_current_ability_index"]
+    cannibal_character_index = [c.name for c in character_list].index("cannibal")
+    
+    lunch_exists = model.new_bool_var(f"cannibal_extra_ability_lunch_exists_{n}")
+    model.add(cannibal_current_ability_index[n] != -1).only_enforce_if(lunch_exists)
+    model.add(cannibal_current_ability_index[n] == -1).only_enforce_if(lunch_exists.Not())
+    
+    for p in range(player_count):
+        model.add_element(
+            cannibal_current_ability_index[n], has_ability[n][p], 1
+        ).only_enforce_if(
+            assigned_char[n][p][cannibal_character_index]
+        ).only_enforce_if(
+            droisoned[n][p].Not()
+        ).only_enforce_if(
+            lunch_exists
+        )
+
+def drunk_extra_ability_condition(
+    model: cp_model.CpModel,
+    player_count: int,
+    has_ability: list[list[list[cp_model.IntVar]]],
+    n: int,
+    **kwargs,
+):
+    character_list: list[Character] = kwargs["character_list"]
+    token_list: list[Token] = kwargs["token_list"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
+    tokens: list[list[list[cp_model.IntVar]]] = kwargs["tokens"]
+    drunk_character_index = [c.name for c in character_list].index("drunk")
+    new_instance_token_index = [t.name for t in token_list].index("new_instance")
+    
+    not_in_play_townsfolk_index = model.new_int_var_from_domain(
+        cp_model.Domain.from_values(
+            j
+            for j, c in enumerate(character_list)
+            if c.character_type == "townsfolk"
+        ),
+        f"drunk_extra_ability_not_in_play_townsfolk_index_{n}"
+    )
+    for c in range(len(character_list)):
+        c_is_in_play = model.new_bool_var(f"drunk_extra_ability_{c}_is_in_play_{n}")
+        model.add_max_equality(
+            c_is_in_play,
+            [
+                assigned_char[n][p][c]
+                for p in range(player_count)
+            ]
+        )
+        model.add(not_in_play_townsfolk_index != c).only_enforce_if(c_is_in_play)
+    
+    for p in range(player_count):
+        p_is_new_drunk = model.new_bool_var(f"extra_ability_{p}_is_new_drunk_{n}")
+        model.add_min_equality(
+            p_is_new_drunk,
+            [
+                assigned_char[n][p][drunk_character_index],
+                tokens[n][p][new_instance_token_index]
+            ]
+        )
+        p_is_old_drunk = model.new_bool_var(f"extra_ability_{p}_is_old_drunk_{n}")
+        model.add_min_equality(
+            p_is_old_drunk,
+            [
+                assigned_char[n][p][drunk_character_index],
+                tokens[n][p][new_instance_token_index].Not()
+            ]
+        )
+        
+        model.add_element(not_in_play_townsfolk_index, has_ability[n][p], 1).only_enforce_if(p_is_new_drunk)
+        if n > 0:
+            for c in range(len(character_list)):
+                model.add(has_ability[n][p][c] == has_ability[n-1][p][c]).only_enforce_if(p_is_old_drunk)
+
+
 def clockmaker_number_learned(**kwargs):
     model: cp_model.CpModel = kwargs["model"]
     player_list: list[Player] = kwargs["player_list"]
@@ -543,26 +647,9 @@ def undertaker_character_index_learned(**kwargs):
     model.add(char_index_learned != undertaker_char_index).only_enforce_if(vortoxed[n][player_index])
     return char_index_learned
 
-
-# TODO
-def cannibal_targets(**kwargs):
-    return False
-def cannibal_character_index_learned(**kwargs):
-    return -1
-def cannibal_number_learned(**kwargs):
-    return -1
-
-def drunk_targets(**kwargs):
-    return False
-def drunk_character_index_learned(**kwargs):
-    return -1
-def drunk_number_learned(**kwargs):
-    return -1
-
-
 full_sized_char_list = [ # FIXME implement monk and DA targeting rules
     Character("clockmaker", "good", "townsfolk", False, -1, clockmaker_number_learned),
-    Character("pixie", "good", "townsfolk", False, pixie_character_index_learned, -1),
+    Character("pixie", "good", "townsfolk", False, pixie_character_index_learned, -1, pixie_extra_ability_condition),
     Character("empath", "good", "townsfolk", False, -1, empath_number_learned),
     Character("mathematician", "good", "townsfolk", False, -1, mathematician_number_learned),
     Character("undertaker", "good", "townsfolk", False, undertaker_character_index_learned, -1),
@@ -571,12 +658,12 @@ full_sized_char_list = [ # FIXME implement monk and DA targeting rules
     Character("lycanthrope", "good", "townsfolk", lambda **kwargs: kwargs["n"] > 0, -1, -1),
     Character("fool", "good", "townsfolk", False, -1, -1),
     Character("tea_lady", "good", "townsfolk", False, -1, -1),
-    Character("cannibal", "good", "townsfolk", cannibal_targets, cannibal_character_index_learned, cannibal_number_learned),
+    Character("cannibal", "good", "townsfolk", False, -1, -1, cannibal_extra_ability_condition),
     Character("mayor", "good", "townsfolk", False, -1, -1),
     Character("atheist", "good", "townsfolk", False, -1, -1),
     Character("puzzlemaster", "good", "outsider", False, -1, -1),
     Character("damsel", "good", "outsider", False, -1, -1),
-    Character("drunk", "good", "outsider", drunk_targets, drunk_character_index_learned, drunk_number_learned),
+    Character("drunk", "good", "outsider", False, -1, -1, drunk_extra_ability_condition),
     Character("barber", "good", "outsider", False, -1, -1),
     Character("poisoner", "evil", "minion", True, -1, -1),
     Character("devils_advocate", "evil", "minion", True, -1, -1),
@@ -612,112 +699,6 @@ teensy_char_list = [
     x[0] for x in sorted(zip(teensy_char_list, teensy_night_order), key=lambda x: x[1])
 ]
 
-
-# def add_pixie_known_token_condition(
-#     model: cp_model.CpModel,
-#     player_list: list[Player],
-#     token_list: list[Token],
-#     tokens: list[list[list[cp_model.IntVar]]],
-#     n: int,
-#     **kwargs,
-# ):
-#     character_list: list[Character] = kwargs["character_list"]
-#     assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
-#     learned_char: list[list[list[cp_model.IntVar]]] = kwargs["learned_char"]
-#     droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
-#     vortoxed: list[list[cp_model.IntVar]] = kwargs["vortoxed"]
-#     character_index = [c.name for c in character_list].index("pixie")
-#     token_index = [t.name for t in token_list].index("pixie_known")
-#     new_instance_token_index = [t.name for t in token_list].index("new_instance")
-    
-#     new_pixie_exists = model.new_bool_var(f"{n}_new_pixie_exists")
-#     old_pixie_exists = model.new_bool_var(f"{n}_old_pixie_exists")
-#     new_pixie_matches = []
-#     old_pixie_matches = []
-#     for p in range(len(player_list)):
-#         m_new = model.new_bool_var(f"{p}_is_new_pixie_{n}")
-#         model.add_min_equality(
-#             m_new,
-#             [
-#                 assigned_char[n][p][character_index],
-#                 tokens[n][p][new_instance_token_index]
-#             ]
-#         )
-#         new_pixie_matches.append(m_new)
-        
-#         m_old = model.new_bool_var(f"{p}_is_old_pixie_{n}")
-#         model.add_min_equality(
-#             m_old,
-#             [
-#                 assigned_char[n][p][character_index],
-#                 tokens[n][p][new_instance_token_index].Not()
-#             ]
-#         )
-#         old_pixie_matches.append(m_old)
-#     model.add_max_equality(new_pixie_exists, new_pixie_matches)
-#     model.add_max_equality(old_pixie_exists, old_pixie_matches)
-#     retain_token(
-#         model,
-#         player_list,
-#         tokens,
-#         n,
-#         token_index,
-#         old_pixie_exists
-#     )
-#     model.add_max_equality(
-#         sum(
-#             tokens[n][p][token_index]
-#             for p in range(len(player_list))
-#         ),
-#         [
-#             old_pixie_exists,
-#             new_pixie_exists
-#         ]
-#     )
-    
-#     for p in range(len(player_list)):
-#         causes = []
-#         for q in range(len(player_list)):
-#             p_has_pixie_q_learned_char = model.new_bool_var(f"{p}_has_pixie_{q}_learned_char_{n}")
-#             q_is_healthy = model.new_bool_var(f"pixie_known_{p}_{q}_is_healthy_{n}")
-#             model.add_min_equality(
-#                 q_is_healthy,
-#                 [
-#                     droisoned[n][q].Not(),
-#                     vortoxed[n][q].Not()
-#                 ]
-#             )
-            
-#             p_assigned_q_learned_character = model.new_bool_var(f"{p}_has_{q}_learned_character_{n}")
-#             matches = []
-#             for i, (a, l) in enumerate(zip(assigned_char[n][p], learned_char[n][q])):
-#                 m = model.new_bool_var(f"{p}_{q}_pixie_{i}_match_{n}")
-#                 model.add_min_equality(
-#                     m,
-#                     [a, l]
-#                 )
-#                 matches.append(m)
-#             model.add_max_equality(
-#                 p_assigned_q_learned_character,
-#                 matches
-#             )
-            
-#             model.add_min_equality(
-#                 p_has_pixie_q_learned_char,
-#                 [
-#                     assigned_char[n][q][character_index],
-#                     p_assigned_q_learned_character
-#                 ]
-#             ).only_enforce_if(q_is_healthy)
-#             model.add_implication(
-#                 p_has_pixie_q_learned_char,
-#                 p_assigned_q_learned_character.Not()
-#             ).only_enforce_if(vortoxed[n][q])
-#             causes.append(p_has_pixie_q_learned_char)
-#         model.add_max_equality(
-#             tokens[n][p][token_index],
-#             causes
-#         ).only_enforce_if(new_pixie_exists)
 
 def add_pixie_known_token_condition( # NOTE: also forces pixie known char to not be in play if vortoxed
     model: cp_model.CpModel,
@@ -841,10 +822,15 @@ def add_pixie_has_ability_token_condition(
     pixie_known_token_index = [t.name for t in token_list].index("pixie_known")
     dead_token_index = [t.name for t in token_list].index("dead")
     
+    if n == 0:
+        for p in range(len(player_list)):
+            model.add(tokens[n][p][token_index] == 0)
+        return
+
     for p in range(len(player_list)):
-        p_is_mad = model.new_bool_var(f"{p}_is_mad_as_learned_char")
+        p_was_mad = model.new_bool_var(f"pixie_has_ability_{p}_was_mad_as_learned_char")
         matches = []
-        for i, (mad, learned) in enumerate(zip(mad_char[n][p], learned_char[n][p])):
+        for i, (mad, learned) in enumerate(zip(mad_char[n-1][p], learned_char[n-1][p])): # FIXME
             m = model.new_bool_var(f"pixie_has_ability_{p}_is_mad_as_char_{i}")
             model.add_min_equality(
                 m,
@@ -852,7 +838,7 @@ def add_pixie_has_ability_token_condition(
             )
             matches.append(m)
         model.add_max_equality(
-            p_is_mad,
+            p_was_mad,
             matches
         )
         
@@ -863,16 +849,17 @@ def add_pixie_has_ability_token_condition(
                 p_gained_q_ability,
                 [
                     assigned_char[n][p][character_index],
-                    p_is_mad,
-                    tokens[n][q][pixie_known_token_index],
-                    tokens[n][q][dead_token_index]
+                    assigned_char[n-1][p][character_index],
+                    p_was_mad,
+                    tokens[n-1][q][pixie_known_token_index],
+                    tokens[n-1][q][dead_token_index]
                 ]
             )
             causes.append(p_gained_q_ability)
         model.add_max_equality(
             tokens[n][p][token_index],
             causes
-        )
+        ) # TODO also make this retain?
 
 
 def add_gambler_attacked_token_condition(
@@ -1333,42 +1320,42 @@ def add_damsel_guess_used_token_condition(
         for p in range(len(player_list)):
             model.add(tokens[n][p][token_index] == 0)
     else:
-        minion_damsel_guessed = model.new_bool_var(f"minion_damsel_guessed_{n}")
-        minion_damsel_guesses = []
+        minion_damsel_guessed_yesterday = model.new_bool_var(f"minion_damsel_guessed_yesterday_{n}")
+        minion_damsel_guesses_from_yesterday = []
         for p in range(len(player_list)):
-            p_minion_damsel_guessed = model.new_bool_var(f"damsel_guess_used_{p}_minion_damsel_guessed_{n}")
-            p_damsel_guessed = model.new_bool_var(f"damsel_guess_used_{p}_damsel_guessed_{n}")
+            p_minion_damsel_guessed_yesterday = model.new_bool_var(f"guess_used_{p}_minion_damsel_guessed_yesterday_{n}")
+            p_damsel_guessed_yesterday = model.new_bool_var(f"damsel_guess_used_{p}_damsel_guessed_yesterday_{n}")
             model.add_max_equality(
-                p_damsel_guessed,
-                damsel_guess[n][p]
+                p_damsel_guessed_yesterday,
+                damsel_guess[n-1][p]
             )
-            p_is_minion = model.new_bool_var(f"damsel_guess_used_{p}_is_minion_{n}")
+            p_was_minion = model.new_bool_var(f"damsel_guess_used_{p}_was_minion_{n}")
             model.add_max_equality(
-                p_is_minion,
+                p_was_minion,
                 [
-                    assigned_char[n][p][j]
+                    assigned_char[n-1][p][j]
                     for j, c in enumerate(character_list)
                     if c.character_type == "minion"
                 ]
             )
             model.add_min_equality(
-                p_minion_damsel_guessed,
+                p_minion_damsel_guessed_yesterday,
                 [
-                    p_damsel_guessed,
-                    p_is_minion
+                    p_damsel_guessed_yesterday,
+                    p_was_minion
                 ]
             )
-            minion_damsel_guesses.append(p_minion_damsel_guessed)
+            minion_damsel_guesses_from_yesterday.append(p_minion_damsel_guessed_yesterday)
         model.add_max_equality(
-            minion_damsel_guessed,
-            minion_damsel_guesses
+            minion_damsel_guessed_yesterday,
+            minion_damsel_guesses_from_yesterday
         )
         for p in range(len(player_list)):
             grant_token_if_damsel = model.new_bool_var(f"grant_{p}_damsel_guess_used_token_if_damsel_{n}")
             model.add_max_equality(
                 grant_token_if_damsel,
                 [
-                    minion_damsel_guessed,
+                    minion_damsel_guessed_yesterday,
                     tokens[n-1][p][token_index]
                 ]
             )

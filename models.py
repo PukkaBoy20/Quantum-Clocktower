@@ -57,6 +57,9 @@ def create_model(
     puzzlemaster_demon_learned: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
     damsel_guess: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
     damsel_guess_order: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
+    pixie_ability_index_learned: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
+    cannibal_current_ability_index: list[cp_model.IntVar] = []
+    has_ability: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
     good_wins: list[cp_model.IntVar] = []
     evil_wins: list[cp_model.IntVar] = []
     game_ended: list[cp_model.IntVar] = []
@@ -73,10 +76,12 @@ def create_model(
             puzzlemaster_guess[n].append([])
             puzzlemaster_demon_learned[n].append([])
             damsel_guess[n].append([])
+            has_ability[n].append([])
             for c in range(len(clocktower.character_list)):
                 assigned_char[n][p].append(model.new_bool_var(f"assigned_char_{n}_{p}_{c}"))
                 learned_char[n][p].append(model.new_bool_var(f"character_learned_{n}_{p}_{c}"))
                 mad_char[n][p].append(model.new_bool_var(f"mad_char_{n}_{p}_{c}"))
+                has_ability[n][p].append(model.new_bool_var(f"has_ability_{n}_{p}_{c}"))
             for q in range(player_count):
                 target[n][p].append(model.new_bool_var(f"target_{n}_{p}_{q}"))
                 puzzlemaster_guess[n][p].append(model.new_bool_var(f"puzzlemaster_guess_{n}_{p}_{q}"))
@@ -96,6 +101,9 @@ def create_model(
                 )
             )
             damsel_guess_order[n].append(model.new_int_var(0, player_count-1, f"damsel_guess_order_{n}_{p}"))
+            pixie_ability_index_learned[n].append(
+                model.new_int_var(0, len(clocktower.character_list)-1, f"pixie_ability_index_learned_{n}_{p}")
+            )
             
         set_is_evil(clocktower, model, player_count, assigned_char, tokens, is_evil, n)
         for p in range(player_count):
@@ -116,13 +124,22 @@ def create_model(
         set_droisoning(clocktower, model, player_count, tokens, droisoned, n)
         set_vortoxed(clocktower, model, player_count, assigned_char, tokens, droisoned, vortoxed, n)
         set_barber_swap_indexes(clocktower, model, player_count, assigned_char, tokens, barber_swap_indexes, n)
-        set_night_info_restrictions(
+        set_targeting(clocktower, model, target, has_ability, n)
+        set_character_learned_info(
             clocktower,
             model,
-            player_count,
             assigned_char,
-            target,
             learned_char,
+            tokens,
+            droisoned,
+            vortoxed,
+            has_ability,
+            n,
+        )
+        set_number_learned_info(
+            clocktower,
+            model,
+            assigned_char,
             num_learned,
             tokens,
             is_evil,
@@ -130,6 +147,7 @@ def create_model(
             abnormal_ability,
             droisoned,
             vortoxed,
+            has_ability,
             n,
         )
         set_damsel_guess_order(clocktower, model, player_count, damsel_guess, damsel_guess_order, n)
@@ -144,8 +162,17 @@ def create_model(
             puzzlemaster_demon_learned,
             n,
         )
-        
-        
+        set_pixie_ability_index_learned(
+            clocktower,
+            model,
+            assigned_char,
+            learned_char,
+            tokens,
+            pixie_ability_index_learned,
+            n,
+        )
+        set_cannibal_current_ability_index(clocktower, model, tokens, cannibal_current_ability_index, n)
+        set_has_ability(clocktower, model, assigned_char, tokens, cannibal_current_ability_index, has_ability, n)
         
         for p in range(player_count):
             model.add_exactly_one(assigned_char[n][p])
@@ -164,6 +191,22 @@ def create_model(
                     for p in range(player_count)
                 ) == 0
             )
+        
+        for character in clocktower.character_list:
+            if character.extra_ability_conditions is not None:
+                character.extra_ability_conditions(
+                    model,
+                    player_count,
+                    has_ability,
+                    n,
+                    character_list=clocktower.character_list,
+                    token_list=clocktower.token_list,
+                    assigned_char=assigned_char,
+                    tokens=tokens,
+                    droisoned=droisoned,
+                    pixie_ability_index_learned=pixie_ability_index_learned,
+                    cannibal_current_ability_index=cannibal_current_ability_index,
+                )
         
         for token in clocktower.token_list:
             if token.conditions is not None:
@@ -294,7 +337,7 @@ def create_model(
     set_outsiders(clocktower, model, player_count, assigned_char)
     for i, p in enumerate(clocktower.players):
         for j, c in enumerate(clocktower.character_list):
-            if c not in p.possible_starting_characters: # TODO would using p.possible_characters speed up solving?
+            if c not in p.possible_starting_characters: # TODO would using p.night_or_day_start_possible_characters speed up solving?
                 model.add(assigned_char[0][i][j] == 0)
     # characters used at most once
     for c in range(len(clocktower.character_list)):
@@ -343,6 +386,103 @@ def create_model(
 
     variables = assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended
     return model, variables
+
+
+
+def set_cannibal_current_ability_index(
+    clocktower: "QuantumClocktower",
+    model: cp_model.CpModel,
+    tokens: list[list[list[cp_model.IntVar]]],
+    cannibal_current_ability_index: list[cp_model.IntVar],
+    n: int,
+):
+    cannibal_lunch_token_index = [t.name for t in clocktower.token_list].index("cannibal_lunch")
+        
+    cannibal_current_ability_index.append(
+        model.new_int_var(-1, len(clocktower.character_list)-1, f"cannibal_current_ability_index_{n}")
+    )
+        
+    for p in range(len(clocktower.players)):
+        for c in range(len(clocktower.character_list)):
+            model.add(cannibal_current_ability_index[n] == c).only_enforce_if(tokens[n][p][cannibal_lunch_token_index])
+    lunch_exists = model.new_bool_var(f"cannibal_lunch_exists_{n}")
+    model.add_min_equality(
+        lunch_exists,
+        [
+            tokens[n][p][cannibal_lunch_token_index]
+            for p in range(len(clocktower.players))
+        ]
+    )
+    model.add(cannibal_current_ability_index[n] == -1).only_enforce_if(lunch_exists.Not())
+
+
+
+def set_pixie_ability_index_learned(
+    clocktower: "QuantumClocktower",
+    model: cp_model.CpModel,
+    assigned_char: list[list[list[cp_model.IntVar]]],
+    learned_char: list[list[list[cp_model.IntVar]]],
+    tokens: list[list[list[cp_model.IntVar]]],
+    pixie_ability_index_learned: list[list[cp_model.IntVar]],
+    n: int,
+):
+    for p in range(len(clocktower.players)):
+        pixie_character_index = [c.name for c in clocktower.character_list].index("pixie")
+        new_instance_token_index = [t.name for t in clocktower.token_list].index("new_instance")
+        for i, learned_char_bool in enumerate(learned_char[n][p]):
+            model.add(pixie_ability_index_learned[n][p] == i).only_enforce_if(
+                    learned_char_bool
+                ).only_enforce_if(
+                    assigned_char[n][p][pixie_character_index]
+                ).only_enforce_if(
+                    tokens[n][p][new_instance_token_index]
+                )
+        if n > 0:
+            model.add(pixie_ability_index_learned[n][p] == pixie_ability_index_learned[n-1][p]).only_enforce_if(
+                    assigned_char[n][p][pixie_character_index]
+                ).only_enforce_if(
+                    tokens[n][p][new_instance_token_index].Not()
+                )
+
+
+
+def set_has_ability(
+    clocktower: "QuantumClocktower",
+    model: cp_model.CpModel,
+    assigned_char: list[list[list[cp_model.IntVar]]],
+    tokens: list[list[list[cp_model.IntVar]]],
+    cannibal_current_ability_index: list[cp_model.IntVar],
+    has_ability: list[list[list[cp_model.IntVar]]],
+    n: int,
+):
+    drunk_character_index = [c.name for c in clocktower.character_list].index("drunk")
+    pixie_has_ability_token_index = [t.name for t in clocktower.token_list].index("pixie_has_ability")
+    cannibal_index = [c.name for c in clocktower.character_list].index("cannibal")
+    
+    for p in range(len(clocktower.players)):
+        for c in range(len(clocktower.character_list)):
+            model.add_implication(assigned_char[n][p][c], has_ability[n][p][c])
+    
+    cannibals_have_ability = model.new_bool_var(f"cannibals_have_ability_{n}")
+    model.add(cannibal_current_ability_index[n] != -1).only_enforce_if(cannibals_have_ability)
+    model.add(cannibal_current_ability_index[n] == -1).only_enforce_if(cannibals_have_ability.Not())
+    
+    for p in range(len(clocktower.players)):
+        p_has_cannibal_extra_ability = model.new_bool_var(f"{p}_has_cannibal_extra_ability_{n}")
+        model.add_min_equality(
+            p_has_cannibal_extra_ability,
+            [
+                assigned_char[n][p][cannibal_index],
+                cannibals_have_ability
+            ]
+        )
+        model.add(
+            sum(has_ability[n][p])
+            == 1
+            + assigned_char[n][p][drunk_character_index]
+            + tokens[n][p][pixie_has_ability_token_index]
+            + p_has_cannibal_extra_ability
+        )
 
 
 
@@ -581,13 +721,10 @@ def set_barber_swap_indexes(
 
 
 
-def set_night_info_restrictions(
+def set_number_learned_info(
     clocktower: "QuantumClocktower",
     model: cp_model.CpModel,
-    player_count: int,
     assigned_char: list[list[list[cp_model.IntVar]]],
-    target: list[list[list[cp_model.IntVar]]],
-    learned_char: list[list[list[cp_model.IntVar]]],
     num_learned: list[list[cp_model.IntVar]],
     tokens: list[list[list[cp_model.IntVar]]],
     is_evil: list[list[cp_model.IntVar]],
@@ -595,49 +732,15 @@ def set_night_info_restrictions(
     abnormal_ability: list[list[cp_model.IntVar]],
     droisoned: list[list[cp_model.IntVar]],
     vortoxed: list[list[cp_model.IntVar]],
+    has_ability: list[list[list[cp_model.IntVar]]],
     n: int,
-    ):
+):
     if n % 2:
         return
     
-    for p in range(player_count):
-        p_targeted = model.new_bool_var(f"{p}_targeted_{n}")
-        model.add_max_equality(
-            p_targeted,
-            target[n][p]
-        )
-        p_char_index_learned = model.new_int_var(-1, len(clocktower.character_list), f"{p}_character_index_learned_{n}")
-        for i, learned_char_bool in enumerate(learned_char[n][p]):
-            model.add(p_char_index_learned == i).only_enforce_if(learned_char_bool)
-            model.add(p_char_index_learned != i).only_enforce_if(learned_char_bool.Not())
-                
+    for p in range(len(clocktower.players)):
+        numbers = []
         for j, c in enumerate(clocktower.character_list):
-            if isinstance(c.targets, bool):
-                c_targets = c.targets
-            else:
-                c_targets: cp_model.IntVar | bool = c.targets(
-                    model=model,
-                    executed_indexes=clocktower.executed_indexes,
-                    n=n,
-                )
-            model.add(p_targeted == c_targets).only_enforce_if(assigned_char[n][p][j])
-            if isinstance(c.char_index_learned, int):
-                c_char_index_learned = -1
-            else:
-                c_char_index_learned: cp_model.IntVar = c.char_index_learned(
-                    model=model,
-                    character_list=clocktower.character_list,
-                    assigned_char=assigned_char,
-                    learned_char=learned_char,
-                    tokens=tokens,
-                    token_list=clocktower.token_list,
-                    executed_indexes=clocktower.executed_indexes,
-                    droisoned=droisoned,
-                    vortoxed=vortoxed,
-                    n=n,
-                    player_index=p,
-                )
-            model.add(p_char_index_learned == c_char_index_learned).only_enforce_if(assigned_char[n][p][j])
             if isinstance(c.number_learned, int):
                 c_number_learned = -1
             else:
@@ -657,7 +760,95 @@ def set_night_info_restrictions(
                     n=n,
                     player_index=p,
                 )
-            model.add(num_learned[n][p] == c_number_learned).only_enforce_if(assigned_char[n][p][j])
+            number_learned_due_to_ability = model.new_int_var(
+                -1, len(clocktower.players), f"{p}_number_learned_due_to_ability_{j}_{n}"
+            )
+            model.add(number_learned_due_to_ability == c_number_learned).only_enforce_if(has_ability[n][p][j])
+            model.add(number_learned_due_to_ability == -1).only_enforce_if(has_ability[n][p][j].Not())
+            numbers.append(number_learned_due_to_ability)
+        model.add_max_equality(num_learned[n][p], numbers)
+        
+
+
+def set_character_learned_info(
+    clocktower: "QuantumClocktower",
+    model: cp_model.CpModel,
+    assigned_char: list[list[list[cp_model.IntVar]]],
+    learned_char: list[list[list[cp_model.IntVar]]],
+    tokens: list[list[list[cp_model.IntVar]]],
+    droisoned: list[list[cp_model.IntVar]],
+    vortoxed: list[list[cp_model.IntVar]],
+    has_ability: list[list[list[cp_model.IntVar]]],
+    n: int,
+):
+    if n % 2:
+        return
+    
+    for p in range(len(clocktower.players)):
+        p_char_index_learned = model.new_int_var(-1, len(clocktower.character_list)-1, f"{p}_character_index_learned_{n}")
+        for c in range(len(clocktower.character_list)):
+            model.add(p_char_index_learned == c).only_enforce_if(learned_char[n][p][c])
+            model.add(p_char_index_learned != c).only_enforce_if(learned_char[n][p][c].Not())
+        
+        indexes = []
+        for j, c in enumerate(clocktower.character_list):
+            if isinstance(c.char_index_learned, int):
+                c_char_index_learned = -1
+            else:
+                c_char_index_learned: cp_model.IntVar = c.char_index_learned(
+                    model=model,
+                    character_list=clocktower.character_list,
+                    assigned_char=assigned_char,
+                    learned_char=learned_char,
+                    tokens=tokens,
+                    token_list=clocktower.token_list,
+                    executed_indexes=clocktower.executed_indexes,
+                    droisoned=droisoned,
+                    vortoxed=vortoxed,
+                    n=n,
+                    player_index=p,
+                )
+            char_index_learned_due_to_ability = model.new_int_var(
+                -1, len(clocktower.character_list)-1, f"{p}_char_index_learned_due_to_ability_{j}_{n}"
+            )
+            model.add(char_index_learned_due_to_ability == c_char_index_learned).only_enforce_if(has_ability[n][p][j])
+            model.add(char_index_learned_due_to_ability == -1).only_enforce_if(has_ability[n][p][j].Not())
+            indexes.append(char_index_learned_due_to_ability)
+        model.add_max_equality(p_char_index_learned, indexes)
+        
+        
+
+def set_targeting(
+    clocktower: "QuantumClocktower",
+    model: cp_model.CpModel,
+    target: list[list[list[cp_model.IntVar]]],
+    has_ability: list[list[list[cp_model.IntVar]]],
+    n: int,
+):
+    if n % 2:
+        return
+    
+    for p in range(len(clocktower.players)):
+        matches = []
+        for j, c in enumerate(clocktower.character_list):
+            if isinstance(c.targets, bool):
+                c_targets = c.targets
+            else:
+                c_targets: cp_model.IntVar | bool = c.targets(
+                    model=model,
+                    executed_indexes=clocktower.executed_indexes,
+                    n=n,
+                )
+            m = model.new_bool_var(f"{p}_targets_due_to_ability_{j}_{n}")
+            model.add_min_equality(
+                m,
+                [
+                    c_targets,
+                    has_ability[n][p][j]
+                ]
+            )
+            matches.append(m)
+        model.add_max_equality(sum(target[n][p]), matches)
 
 
 
@@ -698,9 +889,19 @@ def set_vortoxed(
         if t.name in demon_safe_token_names
     ]
     for p in range(player_count):
+        p_is_townsfolk = model.new_bool_var(f"set_vortoxed_{p}_is_townsfolk_{n}")
+        model.add_max_equality(
+            p_is_townsfolk,
+            [
+                assigned_char[n][p][j]
+                for j, c in enumerate(clocktower.character_list)
+                if c.character_type == "townsfolk"
+            ]
+        )
         model.add_min_equality(
             vortoxed[n][p],
             [sober_vortox_exists]
+            + [p_is_townsfolk]
             + [
                 tokens[n][p][t].Not()
                 for t in demon_safe_token_indexes
