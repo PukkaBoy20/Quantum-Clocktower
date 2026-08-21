@@ -485,9 +485,11 @@ def clockmaker_number_learned(**kwargs):
     model.add(learned_number != 0)
     clockmaker_number = model.new_int_var(1, len(player_list), f"clockmaker_number_{player_index}_{n}")
     distances = []
-    for p in range(len(player_list)): # TODO: should the upper bound be lowered?
+    for p in range(len(player_list)):
         for q in range(len(player_list)):
-            p_is_demon = model.new_bool_var(f"clockmaker_{p}_is_demon{q}_{n}")
+            if p == q:
+                continue
+            p_is_demon = model.new_bool_var(f"clockmaker_{p}_is_demon_{q}_{n}")
             model.add_max_equality(
                 p_is_demon,
                 [
@@ -512,7 +514,9 @@ def clockmaker_number_learned(**kwargs):
                 ]
             )
             p_q_distance = model.new_int_var(1, len(player_list), f"clockmaker_{p}_{q}_distance_{n}")
-            model.add_abs_equality(p_q_distance, p-q).only_enforce_if(p_demon_and_q_minion)
+            model.add(
+                p_q_distance == min((p-q)%len(player_list), (q-p)%len(player_list))
+            ).only_enforce_if(p_demon_and_q_minion)
             model.add(p_q_distance == len(player_list)).only_enforce_if(p_demon_and_q_minion.Not())
             distances.append(p_q_distance)
     model.add_min_equality(
@@ -524,12 +528,12 @@ def clockmaker_number_learned(**kwargs):
         healthy_new_instance,
         [
             droisoned[n][player_index].Not(),
-            vortoxed[n][p].Not(),
+            vortoxed[n][player_index].Not(),
             tokens[n][player_index][new_instance_token_index],
         ]
     )
     model.add(learned_number == clockmaker_number).only_enforce_if(healthy_new_instance)
-    model.add(learned_number != clockmaker_number).only_enforce_if(vortoxed[n][p])
+    model.add(learned_number != clockmaker_number).only_enforce_if(vortoxed[n][player_index])
     model.add(learned_number == -1).only_enforce_if(tokens[n][player_index][new_instance_token_index].Not())
     model.add(learned_number != -1).only_enforce_if(tokens[n][player_index][new_instance_token_index])
     return learned_number
@@ -631,7 +635,7 @@ def undertaker_character_index_learned(**kwargs):
     if n == 0 or executed_indexes[n-1] is None:
         return -1
 
-    undertaker_char_index = model.new_int_var(0, len(character_list), f"undertaker_char_index_{player_index}_{n}")
+    undertaker_char_index = model.new_int_var(0, len(character_list)-1, f"undertaker_char_index_{player_index}_{n}")
     for i, char_bool in enumerate(assigned_char[n-1][executed_indexes[n-1]]):
         model.add(undertaker_char_index == i).only_enforce_if(char_bool)
     healthy = model.new_bool_var(f"undertaker_character_learned_healthy_{player_index}_{n}")
@@ -642,7 +646,7 @@ def undertaker_character_index_learned(**kwargs):
             vortoxed[n][player_index].Not()
         ]
     )
-    char_index_learned = model.new_int_var(0, len(character_list), f"undertaker_char_index_learned_{player_index}_{n}")
+    char_index_learned = model.new_int_var(0, len(character_list)-1, f"undertaker_char_index_learned_{player_index}_{n}")
     model.add(char_index_learned == undertaker_char_index).only_enforce_if(healthy)
     model.add(char_index_learned != undertaker_char_index).only_enforce_if(vortoxed[n][player_index])
     return char_index_learned
@@ -815,8 +819,8 @@ def add_pixie_has_ability_token_condition(
 ):
     character_list: list[Character] = kwargs["character_list"]
     assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
-    learned_char: list[list[list[cp_model.IntVar]]] = kwargs["learned_char"]
     mad_char: list[list[list[cp_model.IntVar]]] = kwargs["mad_char"]
+    pixie_ability_index_learned: list[list[cp_model.IntVar]] = kwargs["pixie_ability_index_learned"]
     character_index = [c.name for c in character_list].index("pixie")
     token_index = [t.name for t in token_list].index("pixie_has_ability")
     pixie_known_token_index = [t.name for t in token_list].index("pixie_known")
@@ -828,19 +832,9 @@ def add_pixie_has_ability_token_condition(
         return
 
     for p in range(len(player_list)):
-        p_was_mad = model.new_bool_var(f"pixie_has_ability_{p}_was_mad_as_learned_char")
-        matches = []
-        for i, (mad, learned) in enumerate(zip(mad_char[n-1][p], learned_char[n-1][p])): # FIXME
-            m = model.new_bool_var(f"pixie_has_ability_{p}_is_mad_as_char_{i}")
-            model.add_min_equality(
-                m,
-                [mad, learned]
-            )
-            matches.append(m)
-        model.add_max_equality(
-            p_was_mad,
-            matches
-        )
+        p_was_mad = model.new_bool_var(f"pixie_has_ability_{p}_was_mad_as_learned_char_{n}")
+        model.add_element(pixie_ability_index_learned[n-1][p], mad_char[n-1][p], 1).only_enforce_if(p_was_mad)
+        model.add_element(pixie_ability_index_learned[n-1][p], mad_char[n-1][p], 0).only_enforce_if(p_was_mad.Not())
         
         causes = []
         for q in range(len(player_list)):
@@ -859,7 +853,7 @@ def add_pixie_has_ability_token_condition(
         model.add_max_equality(
             tokens[n][p][token_index],
             causes
-        ) # TODO also make this retain?
+        )
 
 
 def add_gambler_attacked_token_condition(

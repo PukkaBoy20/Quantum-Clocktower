@@ -233,6 +233,7 @@ def create_model(
                     puzzlemaster_guess=puzzlemaster_guess,
                     damsel_guess=damsel_guess,
                     damsel_guess_order=damsel_guess_order,
+                    pixie_ability_index_learned=pixie_ability_index_learned,
                 )
 
         keep_character_across_nights(clocktower, model, player_count, assigned_char, tokens, n)
