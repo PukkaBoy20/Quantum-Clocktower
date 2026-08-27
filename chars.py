@@ -568,6 +568,8 @@ def pixie_character_index_learned(**kwargs):
 def empath_number_learned(**kwargs):
     model: cp_model.CpModel = kwargs["model"]
     player_list: list[Player] = kwargs["player_list"]
+    token_list: list[Token] = kwargs["token_list"]
+    tokens: list[list[list[cp_model.IntVar]]] = kwargs["tokens"]
     is_evil: list[list[cp_model.IntVar]] = kwargs["is_evil"]
     registers_as_evil: list[list[cp_model.IntVar]] = kwargs["registers_as_evil"]
     droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
@@ -575,18 +577,66 @@ def empath_number_learned(**kwargs):
     n: int = kwargs["n"]
     player_index: int = kwargs["player_index"]
     
+    dead_token_index = [t.name for t in token_list].index("dead")
+    
+    other_player_indexes = [
+        x[0]
+        for x in sorted(
+            zip(
+                range(len(player_list)),
+                [(p-player_index)%len(player_list) for p in range(len(player_list))]
+            ),
+            key=lambda x: x[1]
+        )
+        if x[0] != player_index
+    ]
+    clockwise_distances = []
+    smallest_clockwise_distance = model.new_int_var(0, len(player_list), f"empath_smallest_clockwise_distance_{n}")
+    clockwise_empath_number_part = model.new_bool_var(f"{player_index}_clockwise_empath_number_part_{n}")
+    clockwise_true_empath_number_part = model.new_bool_var(f"{player_index}_clockwise_true_empath_number_part_{n}")
+    for d, q in enumerate(other_player_indexes, start=1):
+        distance = model.new_int_var(0, len(player_list), f"empath_clockwise_distance_{n}")
+        model.add(distance == len(player_list)).only_enforce_if(tokens[n][q][dead_token_index])
+        model.add(distance == d).only_enforce_if(tokens[n][q][dead_token_index].Not())
+        
+        clockwise_distances.append(distance)
+        q_is_closest_clockwise_living_player = model.new_bool_var(f"empath_{q}_is_closest_clockwise_player_{n}")
+        model.add(smallest_clockwise_distance == distance).only_enforce_if(q_is_closest_clockwise_living_player)
+        model.add(smallest_clockwise_distance != distance).only_enforce_if(q_is_closest_clockwise_living_player.Not())
+        
+        model.add(
+            clockwise_empath_number_part == registers_as_evil[n][q]
+        ).only_enforce_if(q_is_closest_clockwise_living_player)
+        model.add(clockwise_true_empath_number_part == is_evil[n][q]).only_enforce_if(q_is_closest_clockwise_living_player)
+    model.add_min_equality(smallest_clockwise_distance, clockwise_distances)
+    
+    anticlockwise_distances = []
+    smallest_anticlockwise_distance = model.new_int_var(0, len(player_list), f"empath_smallest_anticlockwise_distance_{n}")
+    anticlockwise_empath_number_part = model.new_bool_var(f"{player_index}_anticlockwise_empath_number_part_{n}")
+    anticlockwise_true_empath_number_part = model.new_bool_var(f"{player_index}_anticlockwise_true_empath_number_part_{n}")
+    for d, q in enumerate(reversed(other_player_indexes), start=1):
+        distance = model.new_int_var(0, len(player_list), f"empath_antianticlockwise_distance_{n}")
+        model.add(distance == len(player_list)).only_enforce_if(tokens[n][q][dead_token_index])
+        model.add(distance == d).only_enforce_if(tokens[n][q][dead_token_index].Not())
+        
+        anticlockwise_distances.append(distance)
+        q_is_closest_anticlockwise_living_player = model.new_bool_var(f"empath_{q}_is_closest_antianticlockwise_player_{n}")
+        model.add(smallest_anticlockwise_distance == distance).only_enforce_if(q_is_closest_anticlockwise_living_player)
+        model.add(smallest_anticlockwise_distance != distance).only_enforce_if(q_is_closest_anticlockwise_living_player.Not())
+        
+        model.add(
+            anticlockwise_empath_number_part == registers_as_evil[n][q]
+        ).only_enforce_if(q_is_closest_anticlockwise_living_player)
+        model.add(
+            anticlockwise_true_empath_number_part == is_evil[n][q]
+        ).only_enforce_if(q_is_closest_anticlockwise_living_player)
+    model.add_min_equality(smallest_anticlockwise_distance, anticlockwise_distances)
+    
     empath_number = model.new_int_var(0, len(player_list), f"empath_number_{player_index}_{n}")
-    model.add(
-        empath_number
-        == registers_as_evil[n][player_index-1]
-        + registers_as_evil[n][(player_index+1)%len(player_list)]
-    )
+    model.add(empath_number == clockwise_empath_number_part + anticlockwise_empath_number_part)
     true_empath_number = model.new_int_var(0, len(player_list), f"true_empath_number_{player_index}_{n}")
-    model.add(
-        true_empath_number
-        == is_evil[n][player_index-1]
-        + is_evil[n][(player_index+1)%len(player_list)]
-    )
+    model.add(true_empath_number == clockwise_true_empath_number_part + anticlockwise_true_empath_number_part)
+    
     healthy = model.new_bool_var(f"empath_number_learned_healthy_{player_index}_{n}")
     model.add_min_equality(
         healthy,
@@ -651,7 +701,7 @@ def undertaker_character_index_learned(**kwargs):
     model.add(char_index_learned != undertaker_char_index).only_enforce_if(vortoxed[n][player_index])
     return char_index_learned
 
-full_sized_char_list = [ # FIXME implement monk and DA targeting rules
+full_sized_char_list = [ # FIXME implement monk and DA and lycanthrope targeting rules
     Character("clockmaker", "good", "townsfolk", False, -1, clockmaker_number_learned),
     Character("pixie", "good", "townsfolk", False, pixie_character_index_learned, -1, pixie_extra_ability_condition),
     Character("empath", "good", "townsfolk", False, -1, empath_number_learned),
@@ -940,34 +990,106 @@ def add_tea_lady_protected_token_condition(
     **kwargs,
 ):
     character_list: list[Character] = kwargs["character_list"]
-    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
     registers_as_evil: list[list[cp_model.IntVar]] = kwargs["registers_as_evil"]
     droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
+    has_ability: list[list[list[cp_model.IntVar]]] = kwargs["has_ability"]
     character_index = [c.name for c in character_list].index("tea_lady")
     token_index = [t.name for t in token_list].index("tea_lady_protected")
+    dead_token_index = [t.name for t in token_list].index("dead")
     
-    granting_tea_lady_protection = []
+    player_indexes_granted_protection: list[list] = []
     for p in range(len(player_list)):
+        other_player_indexes = [
+            x[0]
+            for x in sorted(
+                zip(
+                    range(len(player_list)),
+                    [(q-p)%len(player_list) for q in range(len(player_list))]
+                ),
+                key=lambda x: x[1]
+            )
+            if x[0] != p
+        ]
+        
+        closest_clockwise_living_player_distance = model.new_int_var(
+            0, len(player_list)-1, f"tea_lady_protection_{p}_closest_clockwise_living_player_distance_{n}"
+        )
+        model.add_min_equality(
+            closest_clockwise_living_player_distance,
+            [
+                d + 100*tokens[n][q][dead_token_index]
+                for d, q in enumerate(other_player_indexes)
+            ]
+        )
+        closest_clockwise_living_player_index = model.new_int_var(
+            0, len(player_list)-1, f"tea_lady_protection_{p}_closest_clockwise_living_player_index_{n}"
+        )
+        model.add_element(
+            closest_clockwise_living_player_distance, other_player_indexes, closest_clockwise_living_player_index
+        )
+        clockwise_living_neighbour_registers_as_evil = model.new_bool_var(
+            f"tea_lady_{p}_clockwise_living_neighbour_registers_as_evil_{n}"
+        )
+        model.add_element(
+            closest_clockwise_living_player_index, registers_as_evil[n], clockwise_living_neighbour_registers_as_evil
+        )
+        
+        closest_anticlockwise_living_player_distance = model.new_int_var(
+            0, len(player_list)-1, f"tea_lady_protection_{p}_closest_anticlockwise_living_player_distance_{n}"
+        )
+        model.add_min_equality(
+            closest_anticlockwise_living_player_distance,
+            [
+                d + 100*tokens[n][q][dead_token_index]
+                for d, q in enumerate(reversed(other_player_indexes))
+            ]
+        )
+        closest_anticlockwise_living_player_index = model.new_int_var(
+            0, len(player_list)-1, f"tea_lady_protection_{p}_closest_anticlockwise_living_player_index_{n}"
+        )
+        model.add_element(
+            closest_anticlockwise_living_player_distance, other_player_indexes, closest_anticlockwise_living_player_index
+        )
+        anticlockwise_living_neighbour_registers_as_evil = model.new_bool_var(
+            f"tea_lady_{p}_anticlockwise_living_neighbour_registers_as_evil_{n}"
+        )
+        model.add_element(
+            closest_anticlockwise_living_player_index, registers_as_evil[n], anticlockwise_living_neighbour_registers_as_evil
+        )
+        
         p_is_granting_tea_lady_protection = model.new_bool_var(f"{p}_is_granting_tea_lady_protection_{n}")
         model.add_min_equality(
             p_is_granting_tea_lady_protection,
             [
-                assigned_char[n][p][character_index],
-                registers_as_evil[n][p-1].Not(),
-                registers_as_evil[n][(p+1)%len(player_list)].Not(),
-                droisoned[n][p].Not()
+                has_ability[n][p][character_index],
+                droisoned[n][p].Not(),
+                clockwise_living_neighbour_registers_as_evil.Not(),
+                anticlockwise_living_neighbour_registers_as_evil.Not()
             ]
         )
-        granting_tea_lady_protection.append(p_is_granting_tea_lady_protection)
-    
+        player_indexes_granted_protection.append(
+            [closest_clockwise_living_player_index, p_is_granting_tea_lady_protection]
+        )
+        player_indexes_granted_protection.append(
+            [closest_anticlockwise_living_player_index, p_is_granting_tea_lady_protection]
+        )
+
     for p in range(len(player_list)):
-        model.add_max_equality(
-            tokens[n][p][token_index],
-            [
-                granting_tea_lady_protection[p-1],
-                granting_tea_lady_protection[(p+1)%len(player_list)]
-            ]
-        )
+        matches = []
+        for i, (player_index, protected) in enumerate(player_indexes_granted_protection):
+            m = model.new_bool_var(f"tea_lady_{p}_is_protected_{i}_{n}")
+            player_indexes_match = model.new_bool_var(f"tea_lady_player_indexes_match_{p}_{i}_{n}")
+            model.add(p == player_index).only_enforce_if(player_indexes_match)
+            model.add(p != player_index).only_enforce_if(player_indexes_match.Not())
+            model.add_min_equality(
+                m,
+                [
+                    player_indexes_match,
+                    protected
+                ]
+            )
+            matches.append(m)
+        model.add_max_equality(tokens[n][p][token_index], matches)
 
 
 def add_cannibal_lunch_token_condition(
