@@ -700,18 +700,18 @@ def undertaker_character_index_learned(**kwargs):
     model.add(char_index_learned == undertaker_char_index).only_enforce_if(healthy)
     model.add(char_index_learned != undertaker_char_index).only_enforce_if(vortoxed[n][player_index])
     return char_index_learned
-
+# FIXME make chars immune to their own droisoning
 full_sized_char_list = [ # FIXME implement monk and DA and lycanthrope targeting rules
     Character("clockmaker", "good", "townsfolk", False, -1, clockmaker_number_learned),
     Character("pixie", "good", "townsfolk", False, pixie_character_index_learned, -1, pixie_extra_ability_condition),
     Character("empath", "good", "townsfolk", False, -1, empath_number_learned),
     Character("mathematician", "good", "townsfolk", False, -1, mathematician_number_learned),
     Character("undertaker", "good", "townsfolk", False, undertaker_character_index_learned, -1),
-    Character("gambler", "good", "townsfolk", lambda **kwargs: kwargs["n"] > 0, -1, -1),
+    Character("gambler", "good", "townsfolk", lambda **kwargs: kwargs["n"] > 0, -1, -1), # FIXME
     Character("monk", "good", "townsfolk", lambda **kwargs: kwargs["n"] > 0, -1, -1),
     Character("lycanthrope", "good", "townsfolk", lambda **kwargs: kwargs["n"] > 0, -1, -1),
     Character("fool", "good", "townsfolk", False, -1, -1),
-    Character("tea_lady", "good", "townsfolk", False, -1, -1),
+    Character("tea lady", "good", "townsfolk", False, -1, -1),
     Character("cannibal", "good", "townsfolk", False, -1, -1, cannibal_extra_ability_condition),
     Character("mayor", "good", "townsfolk", False, -1, -1),
     Character("atheist", "good", "townsfolk", False, -1, -1),
@@ -720,7 +720,7 @@ full_sized_char_list = [ # FIXME implement monk and DA and lycanthrope targeting
     Character("drunk", "good", "outsider", False, -1, -1, drunk_extra_ability_condition),
     Character("barber", "good", "outsider", False, -1, -1),
     Character("poisoner", "evil", "minion", True, -1, -1),
-    Character("devils_advocate", "evil", "minion", True, -1, -1),
+    Character("devils advocate", "evil", "minion", True, -1, -1),
     Character("baron", "evil", "minion", False, -1, -1),
     Character("mastermind", "evil", "minion", False, -1, -1),
     Character("pukka", "evil", "demon", True, -1, -1),
@@ -993,7 +993,7 @@ def add_tea_lady_protected_token_condition(
     registers_as_evil: list[list[cp_model.IntVar]] = kwargs["registers_as_evil"]
     droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
     has_ability: list[list[list[cp_model.IntVar]]] = kwargs["has_ability"]
-    character_index = [c.name for c in character_list].index("tea_lady")
+    character_index = [c.name for c in character_list].index("tea lady")
     token_index = [t.name for t in token_list].index("tea_lady_protected")
     dead_token_index = [t.name for t in token_list].index("dead")
     
@@ -1606,7 +1606,7 @@ def add_devils_advocate_protected_token_condition(
     assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
     target: list[list[list[cp_model.IntVar]]] = kwargs["target"]
     droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
-    character_index = [c.name for c in character_list].index("devils_advocate")
+    character_index = [c.name for c in character_list].index("devils advocate")
     token_index = [t.name for t in token_list].index("devils_advocate_protected")
     
     if n == 0:
@@ -1761,7 +1761,7 @@ def add_mastermind_loss_token_condition(
             )
 
 
-def add_lleech_host_token_condition( # TODO: change this?
+def add_lleech_host_token_condition(
     model: cp_model.CpModel,
     player_list: list[Player],
     token_list: list[Token],
@@ -1776,23 +1776,38 @@ def add_lleech_host_token_condition( # TODO: change this?
     token_index = [t.name for t in token_list].index("lleech_host")
     new_instance_token_index = [t.name for t in token_list].index("new_instance")
     
+    old_lleech_exists = model.new_bool_var(f"lleech_host_token_old_lleech_exists_{n}")
+    causes = []
+    for p in range(len(player_list)):
+        p_is_old_lleech = model.new_bool_var(f"{p}_is_old_lleech_{n}")
+        model.add_min_equality(
+            p_is_old_lleech,
+            [
+                assigned_char[n][p][character_index],
+                tokens[n][p][new_instance_token_index].Not(),
+            ]
+        )
+        causes.append(p_is_old_lleech)
+    model.add_max_equality(old_lleech_exists, causes)
+
     for p in range(len(player_list)):
         causes = []
         for q in range(len(player_list)):
-            p_chosen_by_new_lleech_q = model.new_bool_var(f"{p}_chosen_by_new_lleech_{q}_{n}")
+            p_chosen_by_lleech_q = model.new_bool_var(f"living_{p}_chosen_by_lleech_{q}_{n}")
             model.add_min_equality(
-                p_chosen_by_new_lleech_q,
+                p_chosen_by_lleech_q,
                 [
                     assigned_char[n][q][character_index],
-                    tokens[n][q][new_instance_token_index],
                     target[n][q][p]
                 ]
             )
-            causes.append(p_chosen_by_new_lleech_q)
+            causes.append(p_chosen_by_lleech_q)
         model.add_max_equality(
             tokens[n][p][token_index],
             causes
-        )
+        ).only_enforce_if(old_lleech_exists.Not())
+        if n > 0:
+            model.add(tokens[n][p][token_index] == tokens[n-1][p][token_index]).only_enforce_if(old_lleech_exists)
 
 
 def add_lleech_poisoned_token_condition(
@@ -1857,15 +1872,15 @@ def add_lleech_unkillable_token_condition(
     living_host_exists = model.new_bool_var(f"living_lleech_host_exists_{n}")
     living_hosts = []
     for p in range(len(player_list)):
-        m = model.new_bool_var(f"{p}_is_living_lleech_host")
+        p_is_living_lleech_host = model.new_bool_var(f"{p}_is_living_lleech_host_{n}")
         model.add_min_equality(
-            m,
+            p_is_living_lleech_host,
             [
                 tokens[n][p][lleech_host_token_index],
                 tokens[n][p][dead_token_index].Not()
             ]
         )
-        living_hosts.append(m)
+        living_hosts.append(p_is_living_lleech_host)
     model.add_max_equality(
         living_host_exists,
         living_hosts
@@ -2681,7 +2696,7 @@ def add_pukka_attacked_token_condition(
         causes
     )
     
-    if n == 0:
+    if n == 0 or n % 2:
         for p in range(len(player_list)):
             model.add(tokens[n][p][token_index] == 0)
     else:
@@ -2691,7 +2706,6 @@ def add_pukka_attacked_token_condition(
                 [
                     tokens[n][p][pukka_poisoned_token_index],
                     remembered_tokens[n-1][p][pukka_poisoned_token_index],
-                    tokens[n-1][p][token_index].Not(),
                     new_pukka_instance.Not()
                 ]
             )
@@ -2721,7 +2735,7 @@ def add_starpassed_token_first_night_condition(
         model.add(tokens[p][token_index] == 0)
 
 
-def add_new_instance_token_condition(
+def add_new_instance_token_condition( # FIXME make this work for pixie, drunk etc
     model: cp_model.CpModel,
     player_list: list[Player],
     token_list: list[Token],
@@ -2787,6 +2801,7 @@ def add_dead_token_condition( # NOTE: also constrains extra life used tokens
     token_index = [t.name for t in token_list].index("dead")
     execution_token_index = [t.name for t in token_list].index("executed")
     fool_ability_used_token_index = [t.name for t in token_list].index("fool_ability_used")
+    lycanthrope_protected_token_index = [t.name for t in token_list].index("lycanthrope_protected")
     new_instance_token_index = [t.name for t in token_list].index("new_instance")
     non_demon_attacking_token_indexes = [
         i
@@ -2851,6 +2866,22 @@ def add_dead_token_condition( # NOTE: also constrains extra life used tokens
                     for t in general_protective_token_indexes
                 ]
             )
+            p_safe_from_demon = model.new_bool_var(f"{p}_safe_from_demon_{n}")
+            model.add_max_equality(
+                p_safe_from_demon,
+                [
+                    tokens[n][p][t]
+                    for t in demon_safe_token_indexes
+                ]
+            )
+            p_survives_execution = model.new_bool_var(f"{p}_survives_execution_{n}")
+            model.add_max_equality(
+                p_survives_execution,
+                [
+                    tokens[n][p][t]
+                    for t in execution_survival_token_indexes
+                ]
+            )
             
             p_fatally_attacked_by_non_demon = model.new_bool_var(f"{p}_fatally_attacked_by_non_demon_{n}")
             model.add_min_equality(
@@ -2863,23 +2894,20 @@ def add_dead_token_condition( # NOTE: also constrains extra life used tokens
             p_fatally_attacked_by_demon = model.new_bool_var(f"{p}_fatally_attacked_by_demon_{n}")
             model.add_min_equality(
                 p_fatally_attacked_by_demon,
-                [p_attacked_by_demon]
-                + [
-                    tokens[n][p][t].Not()
-                    for t in demon_safe_token_indexes
+                [
+                    p_attacked_by_demon,
+                    p_generally_protected.Not(),
+                    p_safe_from_demon.Not(),
+                    tokens[n][p][lycanthrope_protected_token_index].Not(),
                 ]
             )
-            
             p_fatally_executed = model.new_bool_var(f"{p}_fatally_executed_{n}")
             model.add_min_equality(
                 p_fatally_executed,
                 [
                     tokens[n][p][execution_token_index],
                     p_generally_protected.Not(),
-                ]
-                + [
-                    tokens[n][p][t].Not()
-                    for t in execution_survival_token_indexes
+                    p_survives_execution.Not(),
                 ]
             )
             
@@ -3016,7 +3044,7 @@ scripts = {
     ],
 }
 
-non_demon_attacking_token_names = ("gambler_attacked", "lycanthrope_attacked")
+non_demon_attacking_token_names = ("gambler_attacked", "lycanthrope_attacked", "lleech_self_kill")
 demon_attacking_token_names = ("imp_attacked", "pukka_attacked", "lleech_attacked", "vortox_attacked")
 demon_safe_token_names = ("monk_protected",)
 protection_token_names = ("tea_lady_protected", "lleech_unkillable")

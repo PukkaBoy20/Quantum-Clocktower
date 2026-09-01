@@ -1,4 +1,4 @@
-from tkinter import Tk, Event, Entry
+from tkinter import Tk, Event, Entry, Checkbutton, IntVar
 from menus import SeatMenu
 from frames import RightMainButtonsFrame, SeatFrame, UtilityButtonsFrame
 from chars import Player, Character, Token, scripts, character_change_token_names, evil_alignment_token_names
@@ -36,6 +36,8 @@ class QuantumClocktower(Tk):
         self.all_day_choices: list[tuple[list[tuple]]] | list[tuple[list]] = []
         self.executed_indexes: list[int | str | None] = []
         self.all_chosen_bluff_indexes: list[tuple | None] = [() for _ in range(player_count)]
+        self.all_madness: list[list[IntVar]] = []  # NOTE: Tkinter IntVar, not ortools # FIXME may be a problem with pixie abilities after N1
+        self.all_mad_char_indexes: list[list[int | None]] = []
 
         evil_players = sample(range(player_count), evil_count(player_count)) #nosec
 
@@ -67,6 +69,7 @@ class QuantumClocktower(Tk):
         self.execution = self.right_main_buttons_frame.execution
         self.seat_menu = SeatMenu(self)
         self.utility_buttons = UtilityButtonsFrame(self, self)
+        self.madness_checkbuttons: list[Checkbutton] = []
 
     def get_player(self, player_name: str) -> Player:
         for player in self.players:
@@ -115,9 +118,10 @@ class QuantumClocktower(Tk):
             self.all_night_choices[-1][self.players.index(self.seat_menu.player)] = (
                 chosen_player, character_learned_index, number_learned, barber_swapped_player_indexes
             )
-            self.all_chosen_bluff_indexes[self.players.index(self.seat_menu.player)] = (
-                chosen_bluff_indexes
-            )
+            if self.night == 1:
+                self.all_chosen_bluff_indexes[self.players.index(self.seat_menu.player)] = (
+                    chosen_bluff_indexes
+                )
         else:
             print("\nInvalid Choice")
             return False
@@ -182,9 +186,11 @@ class QuantumClocktower(Tk):
             return False
         seat_message_parts = []
         if puzzlemaster_guess_index is not None:
-            seat_message_parts.append(
-                f"Puzzle Guessed: {self.players[puzzlemaster_guess_index].name}"
-                f"Learned: {self.players[puzzlemaster_demon_player_learned_index].name}"
+            seat_message_parts.extend(
+                [
+                    f"Puzzle Guessed: {self.players[puzzlemaster_guess_index].name}",
+                    f"Learned: {self.players[puzzlemaster_demon_player_learned_index].name}"
+                ]
             )
         if damsel_guess_index is not None:
             seat_message_parts.append(f"Damsel Guessed: {self.players[damsel_guess_index].name}")
@@ -204,21 +210,26 @@ class QuantumClocktower(Tk):
         self.utility_buttons.enable_buttons()
 
     def night_and_day_end_common_tasks(self, setup: bool, daytime: bool):
+        self.all_madness.append([IntVar() for _ in range(player_count)]) # NOTE: this is a Tkinter IntVar, not an ortools one
+        self.all_mad_char_indexes.append([None]*player_count)
+        
         if not setup:
             self.determine_possible_variables(daytime_override=daytime)
             for p in self.players:
                 p.night_or_day_start_possible_characters = p.possible_characters
             
             model, variables = create_model(self, self.night, daytime)
-            assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_over = variables
+            assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned = variables
             
-            if not self.variable_is_possible(model, game_over[-1].Not()):
+            self.manage_madness_checkbuttons(model, tokens, has_ability, pixie_ability_index_learned)
+            
+            if not self.variable_is_possible(model, game_ended[-1].Not()):
                 self.game_end_sequence(model, daytime, assigned_char, target, learned_char, tokens, is_evil)
         
-        for seat in self.seats:
-            seat.seat.config(text="")
-            if seat.player.dead:
-                seat.add_shroud()
+        for seat_frame in self.seats:
+            seat_frame.seat.config(text="")
+            if seat_frame.player.dead:
+                seat_frame.add_shroud()
                 # TODO: make info default to None when dead (under certain conditions)
     
     def end_night(self):
@@ -255,12 +266,70 @@ class QuantumClocktower(Tk):
         self.night_and_day_end_common_tasks(setup, True)
         self.night += 1
     
+    def manage_madness_checkbuttons(
+        self,
+        model: cp_model.CpModel,
+        tokens: list[list[list[IntVar]]],
+        has_ability: list[list[list[IntVar]]],
+        pixie_ability_index_learned: list[list[IntVar]],
+    ):
+        for checkbutton in self.madness_checkbuttons:
+            checkbutton.destroy()
+        self.madness_checkbuttons.clear()
+        pixie_character_index = [c.name for c in self.character_list].index("pixie")
+        pixie_known_token_index = [t.name for t in self.token_list].index("pixie_known")
+        pixie_has_ability_token_index = [t.name for t in self.token_list].index("pixie_has_ability")
+        dead_token_index = [t.name for t in self.token_list].index("dead")
+        for i, p in enumerate(self.players):
+            if "pixie" not in [c.name for c in p.possible_characters]:
+                if not {"cannibal", "drunk"} & {c.name for c in p.possible_characters}:
+                    continue
+                if not self.variable_is_possible(model, has_ability[-1][i][pixie_character_index]):
+                    continue
+            p_can_gain_pixie_ability = model.new_bool_var(f"madness_{i}_can_gain_pixie_ability_{...}")
+            pixie_known_player_is_dead = model.new_bool_var(f"madness__{i}_pixie_known_player_was_dead_{...}")
+            causes = []
+            for q in range(player_count):
+                q_is_dead_pixie_known = model.new_bool_var(f"madness_{q}_was_dead_pixie_known_{i}_{...}")
+                model.add_min_equality(
+                    q_is_dead_pixie_known,
+                    [
+                        tokens[-1][q][pixie_known_token_index],
+                        tokens[-1][q][dead_token_index]
+                    ]
+                )
+                causes.append(q_is_dead_pixie_known)
+            model.add_max_equality(pixie_known_player_is_dead, causes)
+            model.add_min_equality(
+                p_can_gain_pixie_ability,
+                [
+                    tokens[-1][i][pixie_has_ability_token_index].Not(),
+                    pixie_known_player_is_dead.Not()
+                ]
+            )
+                
+            solver = cp_model.CpSolver()
+            set_solver_parameters(solver)
+            model.add_assumption(p_can_gain_pixie_ability)
+            if solver.solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                mad_char_index = solver.value(pixie_ability_index_learned[-1][i])
+                madness_checkbutton = Checkbutton(
+                    self,
+                    text=f"{p.name} is mad as {self.character_list[mad_char_index].name.title()}",
+                    variable=self.all_madness[-1][i],
+                )
+                madness_checkbutton.pack(side="bottom", anchor="se")
+                self.madness_checkbuttons.append(madness_checkbutton)
+                self.all_mad_char_indexes[-1][i] = mad_char_index
+                self.all_madness[-1][i].set(self.all_madness[-2][i].get())  # keeps checkbutton checked. may have weird interactions
+            model.clear_assumptions()
+    
     def determine_possible_variables(self, daytime_override: bool | None = None):
         if daytime_override is None:
             daytime = self.night_control.night_phase == "Day"
         else:
             daytime = daytime_override
-        model, (assigned_char, _, _, tokens, is_evil, _, _, _) = create_model(self, self.night, daytime)
+        model, (assigned_char, _, _, tokens, is_evil, _, _, _, _, _) = create_model(self, self.night, daytime)
         
         if daytime:
             n = 2*(self.night-1) + 1
@@ -319,7 +388,7 @@ class QuantumClocktower(Tk):
         
         for i, p in enumerate(self.players):
             possible_characters: list[Character] = []
-            p_can_change_character = model.new_bool_var(f"{p}_can_change_character")
+            p_can_change_character = model.new_bool_var(f"{i}_can_change_character")
             model.add_max_equality(
                 p_can_change_character,
                 [

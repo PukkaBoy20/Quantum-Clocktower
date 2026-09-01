@@ -25,7 +25,7 @@ def create_model(
 ):
     """Returns (model, variables)
     
-    where variables = (assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_over)
+    where variables = (assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned)
     """
     model = cp_model.CpModel()
 
@@ -175,6 +175,12 @@ def create_model(
         set_has_ability(clocktower, model, assigned_char, tokens, cannibal_current_ability_index, has_ability, n)
         
         for p in range(player_count):
+            if clocktower.all_madness[n][p].get():
+                model.add_element(clocktower.all_mad_char_indexes[n][p], mad_char[n][p], 1)
+            else:
+                model.add(sum(mad_char[n][p]) == 0)
+        
+        for p in range(player_count):
             model.add_exactly_one(assigned_char[n][p])
             
             model.add_at_most_one(target[n][p])
@@ -182,6 +188,7 @@ def create_model(
             model.add_at_most_one(puzzlemaster_guess[n][p])
             model.add_at_most_one(puzzlemaster_demon_learned[n][p])
             model.add_at_most_one(damsel_guess[n][p])
+            model.add_at_most_one(mad_char[n][p]) # FIXME may need to be changed
 
         if "atheist" in [c.name for c in clocktower.character_list]:
             atheist_index = [c.name for c in clocktower.character_list].index("atheist")
@@ -234,6 +241,8 @@ def create_model(
                     damsel_guess=damsel_guess,
                     damsel_guess_order=damsel_guess_order,
                     pixie_ability_index_learned=pixie_ability_index_learned,
+                    has_ability=has_ability,
+                    clocktower=clocktower, # NOTE: solely used for debugging
                 )
 
         keep_character_across_nights(clocktower, model, player_count, assigned_char, tokens, n)
@@ -385,7 +394,7 @@ def create_model(
     
     set_bluffs(clocktower, model, player_count, player_making_choice_index, chosen_bluff_indexes, assigned_char, now)
 
-    variables = assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended
+    variables = assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned
     return model, variables
 
 
@@ -1116,7 +1125,7 @@ def victory_conditions( # TODO: implement a "day order" for winning tokens
     )
 
     mastermind_active = model.new_bool_var(f"mastermind_active_{n}")
-    if "mastermind" in [t.name for t in clocktower.character_list]:
+    if "mastermind" in [c.name for c in clocktower.character_list]:
         mastermind_day_token_index = [t.name for t in clocktower.token_list].index("mastermind_day")
         model.add_max_equality(
             mastermind_active,
@@ -1217,7 +1226,9 @@ def set_demons(
     tokens: list[list]
     ):
     initial_extra_demon_token_indexes = [
-        i for i, t in enumerate(clocktower.token_list) if t.name in initial_extra_demon_token_names
+        i
+        for i, t in enumerate(clocktower.token_list)
+        if t.name in initial_extra_demon_token_names
     ]
     extra_demons = model.new_int_var(0, len(initial_extra_demon_token_indexes), "extra_demons")
     model.add(
