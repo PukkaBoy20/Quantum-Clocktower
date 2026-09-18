@@ -81,24 +81,43 @@ def make_char_is_droisoned(
     droisoned: list[list[cp_model.IntVar]],
     n: int,
     character_index: int,
-    name: str
+    name: str,
+    token_list: list[Token] | None = None,
+    tokens: list[list[list[cp_model.IntVar]]] | None = None,
+    excluded_droisoning_indexes: list[int] | None = None
 ):
     char_is_droisoned = model.new_bool_var(name)
     matches = []
     for p in range(len(player_list)):
         m = model.new_bool_var(f"{p}_is_droisoned_char_{character_index}_{n}")
-        model.add_min_equality(
-            m,
-            [
-                assigned_char[n][p][character_index],
-                droisoned[n][p]
-            ]
-        )
+        if excluded_droisoning_indexes is None:
+            model.add_min_equality(
+                m,
+                [
+                    assigned_char[n][p][character_index],
+                    droisoned[n][p]
+                ]
+            )
+        else:
+            p_is_droisoned = model.new_bool_var(f"make_char_is_droisoned_{p}_is_droisoned_{n}")
+            model.add_max_equality(
+                p_is_droisoned,
+                [
+                    tokens[n][p][i]
+                    for i, t in enumerate(token_list)
+                    if t.droisoning
+                    and i not in excluded_droisoning_indexes
+                ]
+            )
+            model.add_min_equality(
+                m,
+                [
+                    assigned_char[n][p][character_index],
+                    p_is_droisoned,
+                ]
+            )
         matches.append(m)
-    model.add_max_equality(
-            char_is_droisoned,
-            matches
-        )
+    model.add_max_equality(char_is_droisoned, matches)
     return char_is_droisoned
 
 def token_caused_by_char_existing(
@@ -182,15 +201,29 @@ def token_caused_by_char_existing(
             ) == char_exists
         )
     else:
-        char_is_droisoned = make_char_is_droisoned(
-            model,
-            player_list,
-            assigned_char,
-            droisoned,
-            n,
-            character_index,
-            f"token_caused_by_char_existing_{character_index}_is_droisoned_{n}"
-        )
+        if token_list[token_index].droisoning: # allows characters to droison themselves
+            char_is_droisoned = make_char_is_droisoned(
+                model,
+                player_list,
+                assigned_char,
+                droisoned,
+                n,
+                character_index,
+                f"token_caused_by_char_existing_{character_index}_is_droisoned_{n}",
+                token_list=token_list,
+                tokens=tokens,
+                excluded_droisoning_indexes=[token_index],
+            )
+        else:
+            char_is_droisoned = make_char_is_droisoned(
+                model,
+                player_list,
+                assigned_char,
+                droisoned,
+                n,
+                character_index,
+                f"token_caused_by_char_existing_{character_index}_is_droisoned_{n}"
+            )
                 
         model.add(
             sum(
@@ -283,19 +316,37 @@ def attacking_other_player_token(
                     ]
                 )
             else:
-                model.add_min_equality(
-                    p_attacked_by_q,
-                    [
-                        assigned_char[n][q][character_index],
-                        target[n][q][p],
-                        droisoned[n][q].Not()
-                    ]
-                )
+                if token_list[token_index].name in ("lycanthrope_attacked", "lleech_attacked", "vortox_attacked"):
+                    if n == 0:
+                        model.add(p_attacked_by_q == 0)
+                    else:
+                        model.add_min_equality(
+                            p_attacked_by_q,
+                            [
+                                assigned_char[n][q][character_index],
+                                target[n][q][p],
+                            ] + [
+                                tokens[n][q][i].Not()
+                                for i, t in enumerate(token_list)
+                                if t.droisoning
+                                and t.name not in ("dead", "pukka_poisoned")
+                            ] + [
+                                tokens[n-1][q][[t.name for t in token_list].index("dead")].Not()
+                            ] + [
+                                tokens[n-1][q][[t.name for t in token_list].index("pukka_poisoned")].Not()
+                            ]
+                        )
+                else:
+                    model.add_min_equality(
+                        p_attacked_by_q,
+                        [
+                            assigned_char[n][q][character_index],
+                            target[n][q][p],
+                            droisoned[n][q].Not()
+                        ]
+                    )
             causes.append(p_attacked_by_q)
-        model.add_max_equality(
-            p_attacked,
-            causes
-        )
+        model.add_max_equality(p_attacked, causes)
         attacked.append(p_attacked)
     
         p_is_sober_killed_mayor = model.new_bool_var(f"{p}_is_{token_index}_killed_mayor_{n}")
@@ -333,7 +384,6 @@ def attacking_other_player_token(
                 ]
             )
         attacked_mayor.append(p_is_sober_killed_mayor)
-        
         
     mayor_was_attacked = model.new_bool_var(f"mayor_was_{token_index}_attacked_{n}")
     model.add_max_equality(
@@ -379,7 +429,6 @@ def cannibal_extra_ability_condition(
     **kwargs,
 ):
     character_list: list[Character] = kwargs["character_list"]
-    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
     droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
     cannibal_current_ability_index: list[cp_model.IntVar] = kwargs["cannibal_current_ability_index"]
     cannibal_character_index = [c.name for c in character_list].index("cannibal")
@@ -392,11 +441,9 @@ def cannibal_extra_ability_condition(
         model.add_element(
             cannibal_current_ability_index[n], has_ability[n][p], 1
         ).only_enforce_if(
-            assigned_char[n][p][cannibal_character_index]
-        ).only_enforce_if(
-            droisoned[n][p].Not()
-        ).only_enforce_if(
-            lunch_exists
+            has_ability[n][p][cannibal_character_index],
+            droisoned[n][p].Not(),
+            lunch_exists,
         )
 
 def drunk_extra_ability_condition(
@@ -700,14 +747,24 @@ def undertaker_character_index_learned(**kwargs):
     model.add(char_index_learned == undertaker_char_index).only_enforce_if(healthy)
     model.add(char_index_learned != undertaker_char_index).only_enforce_if(vortoxed[n][player_index])
     return char_index_learned
-# FIXME make chars immune to their own droisoning
-full_sized_char_list = [ # FIXME implement monk and DA and lycanthrope targeting rules
+
+def gambler_character_index_learned(**kwargs):
+    model: cp_model.CpModel = kwargs["model"]
+    character_list: list[Character] = kwargs["character_list"]
+    n: int = kwargs["n"]
+    player_index: int = kwargs["player_index"]
+    
+    if n == 0:
+        return -1
+    return model.new_int_var(0, len(character_list)-1, f"gambler_character_index_learned_{player_index}_{n}")
+
+full_sized_char_list = [
     Character("clockmaker", "good", "townsfolk", False, -1, clockmaker_number_learned),
     Character("pixie", "good", "townsfolk", False, pixie_character_index_learned, -1, pixie_extra_ability_condition),
     Character("empath", "good", "townsfolk", False, -1, empath_number_learned),
     Character("mathematician", "good", "townsfolk", False, -1, mathematician_number_learned),
     Character("undertaker", "good", "townsfolk", False, undertaker_character_index_learned, -1),
-    Character("gambler", "good", "townsfolk", lambda **kwargs: kwargs["n"] > 0, -1, -1), # FIXME
+    Character("gambler", "good", "townsfolk", lambda **kwargs: kwargs["n"] > 0, gambler_character_index_learned, -1),
     Character("monk", "good", "townsfolk", lambda **kwargs: kwargs["n"] > 0, -1, -1),
     Character("lycanthrope", "good", "townsfolk", lambda **kwargs: kwargs["n"] > 0, -1, -1),
     Character("fool", "good", "townsfolk", False, -1, -1),
@@ -753,7 +810,8 @@ teensy_char_list = [
     x[0] for x in sorted(zip(teensy_char_list, teensy_night_order), key=lambda x: x[1])
 ]
 
-
+# TODO: think about this
+# NOTE: if droisoned and an in-play character is learned the token is applied correctly to avoid duplicate abilities
 def add_pixie_known_token_condition( # NOTE: also forces pixie known char to not be in play if vortoxed
     model: cp_model.CpModel,
     player_list: list[Player],
@@ -918,9 +976,17 @@ def add_gambler_attacked_token_condition(
     assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
     target: list[list[list[cp_model.IntVar]]] = kwargs["target"]
     learned_char: list[list[list[cp_model.IntVar]]] = kwargs["learned_char"]
-    droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
     character_index = [c.name for c in character_list].index("gambler")
     token_index = [t.name for t in token_list].index("gambler_attacked")
+    
+    if n == 0:
+        model.add(
+            sum(
+                tokens[n][p][token_index]
+                for p in range(len(player_list))
+            ) == 0
+        )
+        return
     
     for p in range(len(player_list)):
         healthy_incorrect_gambles = []
@@ -945,7 +1011,15 @@ def add_gambler_attacked_token_condition(
                     assigned_char[n][p][character_index],
                     target[n][p][q],
                     p_gambled_q_char.Not(),
-                    droisoned[n][p].Not()
+                ] + [
+                    tokens[n][p][i].Not()
+                    for i, t in enumerate(token_list)
+                    if t.droisoning
+                    and t.name not in ("dead", "pukka_poisoned")
+                ] + [
+                    tokens[n-1][p][[t.name for t in token_list].index("dead")].Not()
+                ] + [
+                    tokens[n-1][p][[t.name for t in token_list].index("pukka_poisoned")].Not()
                 ]
             )
             healthy_incorrect_gambles.append(healthy_p_gambled_q_incorrectly)
@@ -980,7 +1054,7 @@ def add_fool_protected_token_condition(
             ]
         )
 
-
+# FIXME fix interaction when multiple deaths happen next to a tea lady in one night
 def add_tea_lady_protected_token_condition(
     model: cp_model.CpModel,
     player_list: list[Player],
@@ -1014,13 +1088,16 @@ def add_tea_lady_protected_token_condition(
         closest_clockwise_living_player_distance = model.new_int_var(
             0, len(player_list)-1, f"tea_lady_protection_{p}_closest_clockwise_living_player_distance_{n}"
         )
-        model.add_min_equality(
-            closest_clockwise_living_player_distance,
-            [
-                d + 100*tokens[n][q][dead_token_index]
-                for d, q in enumerate(other_player_indexes)
-            ]
-        )
+        if n == 0:  # NOTE: the distances stored are 1 less than the actual distance
+            model.add(closest_clockwise_living_player_distance == 0)
+        else:
+            model.add_min_equality(
+                closest_clockwise_living_player_distance,
+                [
+                    d + 100*tokens[n-1][q][dead_token_index]
+                    for d, q in enumerate(other_player_indexes)
+                ]
+            )
         closest_clockwise_living_player_index = model.new_int_var(
             0, len(player_list)-1, f"tea_lady_protection_{p}_closest_clockwise_living_player_index_{n}"
         )
@@ -1037,13 +1114,16 @@ def add_tea_lady_protected_token_condition(
         closest_anticlockwise_living_player_distance = model.new_int_var(
             0, len(player_list)-1, f"tea_lady_protection_{p}_closest_anticlockwise_living_player_distance_{n}"
         )
-        model.add_min_equality(
-            closest_anticlockwise_living_player_distance,
-            [
-                d + 100*tokens[n][q][dead_token_index]
-                for d, q in enumerate(reversed(other_player_indexes))
-            ]
-        )
+        if n == 0:
+            model.add(closest_anticlockwise_living_player_distance == 0)
+        else:
+            model.add_min_equality(
+                closest_anticlockwise_living_player_distance,
+                [
+                    d + 100*tokens[n-1][q][dead_token_index]
+                    for d, q in enumerate(reversed(other_player_indexes))
+                ]
+            )
         closest_anticlockwise_living_player_index = model.new_int_var(
             0, len(player_list)-1, f"tea_lady_protection_{p}_closest_anticlockwise_living_player_index_{n}"
         )
@@ -1593,7 +1673,7 @@ def add_barber_swapped_token_condition( # TODO: when does this happen?
             causes.append(cause)
         model.add_max_equality(tokens[n][p][token_index], causes)
 
-
+# NOTE: also constrains targeting
 def add_devils_advocate_protected_token_condition(
     model: cp_model.CpModel,
     player_list: list[Player],
@@ -1608,6 +1688,8 @@ def add_devils_advocate_protected_token_condition(
     droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
     character_index = [c.name for c in character_list].index("devils advocate")
     token_index = [t.name for t in token_list].index("devils_advocate_protected")
+    new_instance_token_index = [t.name for t in token_list].index("new_instance")
+    dead_token_index = [t.name for t in token_list].index("dead")
     
     if n == 0:
         model.add(
@@ -1635,6 +1717,19 @@ def add_devils_advocate_protected_token_condition(
                 tokens[n][p][token_index],
                 causes
             )
+            for q in range(len(player_list)):
+                model.add_bool_or(
+                    assigned_char[n][p][character_index].Not(),
+                    target[n][p][q].Not(),
+                    tokens[n-1][q][dead_token_index].Not(),
+                )
+                if n > 1:
+                    model.add_bool_or(
+                        assigned_char[n][p][character_index].Not(),
+                        tokens[n][p][new_instance_token_index],
+                        target[n][p][q].Not(),
+                        target[n-2][p][q].Not(),
+                    )
 
 
 def add_mastermind_day_token_condition( # NOTE: does not work when multiple living demons are possible
@@ -2153,7 +2248,7 @@ def add_balloonist_known_token_condition(
             p_chose_same_char_type.Not()
         ).only_enforce_if(p_is_droisoned.Not())
 
-
+# NOTE: also constrains targeting
 def add_lycanthrope_attacked_token_condition(
     model: cp_model.CpModel,
     player_list: list[Player],
@@ -2169,12 +2264,20 @@ def add_lycanthrope_attacked_token_condition(
     registers_as_evil: list[list[cp_model.IntVar]] = kwargs["registers_as_evil"]
     character_index = [c.name for c in character_list].index("lycanthrope")
     token_index = [t.name for t in token_list].index("lycanthrope_attacked")
+    dead_token_index = [t.name for t in token_list].index("dead")
     
     for p in range(len(player_list)):
         model.add_implication(
             registers_as_evil[n][p],
             tokens[n][p][token_index].Not()
         )
+        if n > 0:
+            for q in range(len(player_list)):
+                model.add_bool_or(
+                    assigned_char[n][p][character_index].Not(),
+                    target[n][p][q].Not(),
+                    tokens[n-1][q][dead_token_index].Not(),
+                )
     
     attacking_other_player_token(
         model,
@@ -2199,15 +2302,44 @@ def add_lycanthrope_protected_token_condition( # TODO: fix bug with fool?
     n: int,
     **kwargs,
 ):
-    lycanthrope_attacked_token_index = [t.name for t in token_list].index("lycanthrope_attacked")
+    character_list: list[Character] = kwargs["character_list"]
+    assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
+    droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
+    character_index = [c.name for c in character_list].index("lycanthrope")
     token_index = [t.name for t in token_list].index("lycanthrope_protected")
+    lycanthrope_attacked_token_index = [t.name for t in token_list].index("lycanthrope_attacked")
+    dead_token_index = [t.name for t in token_list].index("dead")
+    
+    lycanthrope_is_droisoned = make_char_is_droisoned(
+        model,
+        player_list,
+        assigned_char,
+        droisoned,
+        n,
+        character_index,
+        f"lycanthrope_protected_lycanthrope_is_droisoned_{n}",
+    )
+        
+    lycanthrope_killed_someone = model.new_bool_var(f"lycanthrope_killed_someone_{n}")
+    causes = []
+    for p in range(len(player_list)):
+        p_killed_by_lycanthrope = model.new_bool_var(f"{p}_killed_by_lycanthrope_{n}")
+        model.add_min_equality(
+            p_killed_by_lycanthrope,
+            [
+                tokens[n][p][lycanthrope_attacked_token_index],
+                tokens[n][p][dead_token_index],
+            ]
+        )
+        causes.append(p_killed_by_lycanthrope)
+    model.add_max_equality(lycanthrope_killed_someone, causes)
     
     for p in range(len(player_list)):
-        model.add_max_equality(
+        model.add_min_equality(
             tokens[n][p][token_index],
             [
-                tokens[n][q][lycanthrope_attacked_token_index]
-                for q in range(len(player_list))
+                lycanthrope_killed_someone,
+                lycanthrope_is_droisoned.Not(),
             ]
         )
 
@@ -2353,6 +2485,7 @@ def add_monk_protected_token_condition(
             tokens[n][p][token_index],
             causes
         )
+        model.add_at_most_one(assigned_char[n][p][character_index], target[n][p][p])
 
 
 def add_alchemist_poisoned_token_night_condition(
@@ -2497,8 +2630,8 @@ def add_klutz_picked_token_night_condition(
     for p in range(len(player_list)):
         model.add(tokens[p][token_index] == 0)
 
-
-def add_poisoned_token_night_condition(
+# NOTE: a poisoner choosing themselves does nothing
+def add_poisoned_token_night_condition( # FIXME give poisoner priority over the demons
     model: cp_model.CpModel,
     player_list: list[Player],
     token_list: list[Token],
@@ -2517,6 +2650,8 @@ def add_poisoned_token_night_condition(
         for p in range(len(player_list)):
             causes = []
             for q in range(len(player_list)):
+                if p == q:
+                    continue
                 sober_poisoner_q_chose_p = model.new_bool_var(f"poisoner_{q}_chose_{p}_{n}")
                 model.add_min_equality(
                     sober_poisoner_q_chose_p,
@@ -2615,21 +2750,41 @@ def add_pukka_poisoned_token_condition(
     
     for p in range(len(player_list)):
         p_got_pukka_poisoned_tonight = model.new_bool_var(f"{p}_got_pukka_poisoned_{n}")
+        p_is_demon_safe = model.new_bool_var(f"pukka_poisoned_{p}_is_demon_safe_{n}")
+        model.add_max_equality(
+            p_is_demon_safe,
+            [
+                tokens[n][p][t]
+                for t in demon_safe_token_indexes
+            ]
+        )
         causes = []
         for q in range(len(player_list)):
-            q_pukka_poisoned_p = model.new_bool_var((f"{q}_pukka_poisoned_{p}"))
-            model.add_min_equality(
-                q_pukka_poisoned_p,
-                [
-                    assigned_char[n][q][character_index],
-                    target[n][q][p],
-                    droisoned[n][q].Not()
-                ]
-                + [
-                    tokens[n][p][t].Not()
-                    for t in demon_safe_token_indexes
-                ]
-            )
+            q_pukka_poisoned_p = model.new_bool_var((f"{q}_pukka_poisoned_{p}_{n}"))
+            if p == q:
+                model.add_min_equality(
+                    q_pukka_poisoned_p,
+                    [
+                        assigned_char[n][q][character_index],
+                        target[n][q][p],
+                        p_is_demon_safe.Not(),
+                    ] + [
+                        tokens[n][q][i]
+                        for i, t in enumerate(token_list)
+                        if t.droisoning
+                        and t.name != "pukka_poisoned"
+                    ]
+                )
+            else:
+                model.add_min_equality(
+                    q_pukka_poisoned_p,
+                    [
+                        assigned_char[n][q][character_index],
+                        target[n][q][p],
+                        p_is_demon_safe.Not(),
+                        droisoned[n][q].Not(),
+                    ]
+                )
             causes.append(q_pukka_poisoned_p)
         model.add_max_equality(
             p_got_pukka_poisoned_tonight,
@@ -2637,8 +2792,10 @@ def add_pukka_poisoned_token_condition(
         )
         
         p_has_unresolved_pukka_poison = model.new_bool_var(f"{p}_has_unresolved_pukka_poison_{n}")
+        p_old_poison_cured = model.new_bool_var(f"{p}_old_pukka_poison_cured_{n}")
         if n == 0:
             model.add(p_has_unresolved_pukka_poison == 0)
+            model.add(p_old_poison_cured == 0)
         else:
             model.add_min_equality(
                 p_has_unresolved_pukka_poison,
@@ -2647,20 +2804,33 @@ def add_pukka_poisoned_token_condition(
                     tokens[n-1][p][pukka_attacked_token_index].Not()
                 ]
             )
+            model.add_min_equality(
+                p_old_poison_cured,
+                [
+                    p_has_unresolved_pukka_poison,
+                    pukka_is_droisoned.Not(),
+                    p_is_demon_safe,
+                ]
+            )
+        # this feels so wrong
         model.add_max_equality(
             remembered_tokens[n][p][token_index],
             [
                 p_got_pukka_poisoned_tonight,
-                p_has_unresolved_pukka_poison
+                p_has_unresolved_pukka_poison + p_old_poison_cured.Not() - 1
             ]
         )
+        
         model.add_min_equality(
             tokens[n][p][token_index],
             [
                 remembered_tokens[n][p][token_index],
                 pukka_is_droisoned.Not()
             ]
-        )
+        ).only_enforce_if(assigned_char[n][p][character_index].Not())
+        model.add(
+            tokens[n][p][token_index] == remembered_tokens[n][p][token_index]
+        ).only_enforce_if(assigned_char[n][p][character_index])
 
 
 def add_pukka_attacked_token_condition(
@@ -2706,7 +2876,8 @@ def add_pukka_attacked_token_condition(
                 [
                     tokens[n][p][pukka_poisoned_token_index],
                     remembered_tokens[n-1][p][pukka_poisoned_token_index],
-                    new_pukka_instance.Not()
+                    new_pukka_instance.Not(),
+                    assigned_char[n][p][character_index].Not(),
                 ]
             )
 
@@ -2734,7 +2905,7 @@ def add_starpassed_token_first_night_condition(
     for p in range(len(player_list)):
         model.add(tokens[p][token_index] == 0)
 
-
+# TODO make sure this is assigned at the right time
 def add_new_instance_token_condition( # FIXME make this work for pixie, drunk etc
     model: cp_model.CpModel,
     player_list: list[Player],

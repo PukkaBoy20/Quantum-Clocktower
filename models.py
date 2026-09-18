@@ -25,7 +25,7 @@ def create_model(
 ):
     """Returns (model, variables)
     
-    where variables = (assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned)
+    where variables = (assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned, cannibal_current_ability_index)
     """
     model = cp_model.CpModel()
 
@@ -171,7 +171,7 @@ def create_model(
             pixie_ability_index_learned,
             n,
         )
-        set_cannibal_current_ability_index(clocktower, model, tokens, cannibal_current_ability_index, n)
+        set_cannibal_current_ability_index(clocktower, model, assigned_char, tokens, cannibal_current_ability_index, n)
         set_has_ability(clocktower, model, assigned_char, tokens, cannibal_current_ability_index, has_ability, n)
         
         for p in range(player_count):
@@ -394,7 +394,7 @@ def create_model(
     
     set_bluffs(clocktower, model, player_count, player_making_choice_index, chosen_bluff_indexes, assigned_char, now)
 
-    variables = assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned
+    variables = assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned, cannibal_current_ability_index
     return model, variables
 
 
@@ -402,6 +402,7 @@ def create_model(
 def set_cannibal_current_ability_index(
     clocktower: "QuantumClocktower",
     model: cp_model.CpModel,
+    assigned_char: list[list[list[cp_model.IntVar]]],
     tokens: list[list[list[cp_model.IntVar]]],
     cannibal_current_ability_index: list[cp_model.IntVar],
     n: int,
@@ -411,12 +412,9 @@ def set_cannibal_current_ability_index(
     cannibal_current_ability_index.append(
         model.new_int_var(-1, len(clocktower.character_list)-1, f"cannibal_current_ability_index_{n}")
     )
-        
-    for p in range(len(clocktower.players)):
-        for c in range(len(clocktower.character_list)):
-            model.add(cannibal_current_ability_index[n] == c).only_enforce_if(tokens[n][p][cannibal_lunch_token_index])
+    
     lunch_exists = model.new_bool_var(f"cannibal_lunch_exists_{n}")
-    model.add_min_equality(
+    model.add_max_equality(
         lunch_exists,
         [
             tokens[n][p][cannibal_lunch_token_index]
@@ -424,6 +422,11 @@ def set_cannibal_current_ability_index(
         ]
     )
     model.add(cannibal_current_ability_index[n] == -1).only_enforce_if(lunch_exists.Not())
+    
+    for p in range(len(clocktower.players)):
+        model.add_element(
+            cannibal_current_ability_index[n], assigned_char[n][p], tokens[n][p][cannibal_lunch_token_index]
+        ).only_enforce_if(lunch_exists)
 
 
 
@@ -482,7 +485,7 @@ def set_has_ability(
         model.add_min_equality(
             p_has_cannibal_extra_ability,
             [
-                assigned_char[n][p][cannibal_index],
+                has_ability[n][p][cannibal_index],
                 cannibals_have_ability
             ]
         )

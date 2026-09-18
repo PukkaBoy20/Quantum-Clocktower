@@ -219,9 +219,9 @@ class QuantumClocktower(Tk):
                 p.night_or_day_start_possible_characters = p.possible_characters
             
             model, variables = create_model(self, self.night, daytime)
-            assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned = variables
+            assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned, cannibal_current_ability_index = variables
             
-            self.manage_madness_checkbuttons(model, tokens, has_ability, pixie_ability_index_learned)
+            self.manage_madness_checkbuttons(model, tokens, has_ability, pixie_ability_index_learned, cannibal_current_ability_index)
             
             if not self.variable_is_possible(model, game_ended[-1].Not()):
                 self.game_end_sequence(model, daytime, assigned_char, target, learned_char, tokens, is_evil)
@@ -269,16 +269,19 @@ class QuantumClocktower(Tk):
     def manage_madness_checkbuttons(
         self,
         model: cp_model.CpModel,
-        tokens: list[list[list[IntVar]]],
-        has_ability: list[list[list[IntVar]]],
-        pixie_ability_index_learned: list[list[IntVar]],
+        tokens: list[list[list[cp_model.IntVar]]],
+        has_ability: list[list[list[cp_model.IntVar]]],
+        pixie_ability_index_learned: list[list[cp_model.IntVar]],
+        cannibal_current_ability_index: list[cp_model.IntVar],
     ):
         for checkbutton in self.madness_checkbuttons:
             checkbutton.destroy()
         self.madness_checkbuttons.clear()
         pixie_character_index = [c.name for c in self.character_list].index("pixie")
+        cannibal_character_index = [c.name for c in self.character_list].index("cannibal")
         pixie_known_token_index = [t.name for t in self.token_list].index("pixie_known")
         pixie_has_ability_token_index = [t.name for t in self.token_list].index("pixie_has_ability")
+        cannibal_poisoned_token_index = [t.name for t in self.token_list].index("cannibal_poisoned")
         dead_token_index = [t.name for t in self.token_list].index("dead")
         for i, p in enumerate(self.players):
             if "pixie" not in [c.name for c in p.possible_characters]:
@@ -287,7 +290,7 @@ class QuantumClocktower(Tk):
                 if not self.variable_is_possible(model, has_ability[-1][i][pixie_character_index]):
                     continue
             p_can_gain_pixie_ability = model.new_bool_var(f"madness_{i}_can_gain_pixie_ability_{...}")
-            pixie_known_player_is_dead = model.new_bool_var(f"madness__{i}_pixie_known_player_was_dead_{...}")
+            pixie_known_player_is_dead = model.new_bool_var(f"madness_{i}_pixie_known_player_was_dead_{...}")
             causes = []
             for q in range(player_count):
                 q_is_dead_pixie_known = model.new_bool_var(f"madness_{q}_was_dead_pixie_known_{i}_{...}")
@@ -329,7 +332,8 @@ class QuantumClocktower(Tk):
             daytime = self.night_control.night_phase == "Day"
         else:
             daytime = daytime_override
-        model, (assigned_char, _, _, tokens, is_evil, _, _, _, _, _) = create_model(self, self.night, daytime)
+        model, (assigned_char, _, _, tokens, is_evil, _, _, game_ended, _, _, _) = create_model(self, self.night, daytime)
+        model.add(game_ended[-1] == 0) # TODO change? (alongside other constraint)
         
         if daytime:
             n = 2*(self.night-1) + 1
