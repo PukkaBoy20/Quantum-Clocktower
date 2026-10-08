@@ -394,7 +394,7 @@ def create_model(
     
     set_bluffs(clocktower, model, player_count, player_making_choice_index, chosen_bluff_indexes, assigned_char, now)
 
-    variables = assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned, cannibal_current_ability_index
+    variables = assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned
     return model, variables
 
 
@@ -444,16 +444,13 @@ def set_pixie_ability_index_learned(
         new_instance_token_index = [t.name for t in clocktower.token_list].index("new_instance")
         for i, learned_char_bool in enumerate(learned_char[n][p]):
             model.add(pixie_ability_index_learned[n][p] == i).only_enforce_if(
-                    learned_char_bool
-                ).only_enforce_if(
-                    assigned_char[n][p][pixie_character_index]
-                ).only_enforce_if(
+                    learned_char_bool,
+                    assigned_char[n][p][pixie_character_index],
                     tokens[n][p][new_instance_token_index]
                 )
         if n > 0:
             model.add(pixie_ability_index_learned[n][p] == pixie_ability_index_learned[n-1][p]).only_enforce_if(
-                    assigned_char[n][p][pixie_character_index]
-                ).only_enforce_if(
+                    assigned_char[n][p][pixie_character_index],
                     tokens[n][p][new_instance_token_index].Not()
                 )
 
@@ -979,7 +976,10 @@ def keep_character_across_nights(
             if len(character_change_token_indexes) > 0:
                 model.add_max_equality(
                     p_changed_character,
-                    [tokens[n][p][t] for t in character_change_token_indexes]
+                    [
+                        tokens[n][p][t] for
+                        t in character_change_token_indexes
+                    ]
                 )
             else:
                 model.add(p_changed_character == 0)
@@ -1340,24 +1340,24 @@ def set_bluffs(
     if now == 0 and player_making_choice_index is not None:
         new_all_chosen_bluff_indexes[player_making_choice_index] = chosen_bluff_indexes
     
-    learned_bluffs = [
+    chose_bluffs = [
         model.new_bool_var(f"{p}_learned_bluffs")
         for p in range(player_count)
     ]
     for p in range(player_count):
         match new_all_chosen_bluff_indexes[p]:
             case None:
-                model.add(learned_bluffs[p] == 0)
+                model.add(chose_bluffs[p] == 0)
             case (_, _, _):
-                model.add(learned_bluffs[p] == 1)
+                model.add(chose_bluffs[p] == 1)
     if player_count < 7:
-        model.add(sum(learned_bluffs) == 0)
+        model.add(sum(chose_bluffs) == 0)
         return
-    model.add(sum(learned_bluffs) > 0)
+    model.add(sum(chose_bluffs) > 0)
     if clocktower.evils_predetermined:
         for i, p in enumerate(clocktower.players):
             if p.alignment == "good":
-                model.add(learned_bluffs[i] == 0)
+                model.add(chose_bluffs[i] == 0)
     actual_bluffs = [
         model.new_int_var_from_domain(
             cp_model.Domain.from_values(

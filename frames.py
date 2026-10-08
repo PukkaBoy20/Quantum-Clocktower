@@ -211,10 +211,8 @@ class NightControlFrame(Frame):
     @night_phase.setter
     def night_phase(self, value: str) -> None:
         self._night_phase.set(value)
-        self.start_night_button.config(
-            state="disabled" if value == "Night" else "normal"
-        )
-        self.end_night_button.config(state="normal" if value == "Night" else "disabled")
+        self.start_night_button.config(state="disabled" if value.startswith("Night") else "normal")
+        self.end_night_button.config(state="normal" if value.startswith("Night") else "disabled")
 
 
 class ExecutionFrame(Frame):

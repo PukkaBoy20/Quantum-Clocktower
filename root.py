@@ -23,6 +23,7 @@ class QuantumClocktower(Tk):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.geometry(f"{self.INITIAL_WINDOW_SIZE}x{self.INITIAL_WINDOW_SIZE}")
+        self.title("Quantum Clocktower")
 
         self.int_vcmd = (self.register(only_int), "%P")
 
@@ -30,7 +31,7 @@ class QuantumClocktower(Tk):
         self.character_list: list[Character] = list(scripts.values())[self.script_index][0]
         self.token_list: list[Token] = list(scripts.values())[self.script_index][1]
 
-        self.night = 0
+        self.night = 0 # TODO this should probably be changed to represent n
         self.show_alignments = False
         self.all_night_choices: list[list[tuple]] | list[list] = []
         self.all_day_choices: list[tuple[list[tuple]]] | list[tuple[list]] = []
@@ -70,7 +71,12 @@ class QuantumClocktower(Tk):
         self.seat_menu = SeatMenu(self)
         self.utility_buttons = UtilityButtonsFrame(self, self)
         self.madness_checkbuttons: list[Checkbutton] = []
+        # TODO make a game log (with a text widget?)
 
+    @property
+    def daytime(self):
+        return self.night_control.night_phase.startswith("Day") # I'm sorry
+    
     def get_player(self, player_name: str) -> Player:
         for player in self.players:
             if player.name == player_name:
@@ -219,9 +225,9 @@ class QuantumClocktower(Tk):
                 p.night_or_day_start_possible_characters = p.possible_characters
             
             model, variables = create_model(self, self.night, daytime)
-            assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned, cannibal_current_ability_index = variables
-            
-            self.manage_madness_checkbuttons(model, tokens, has_ability, pixie_ability_index_learned, cannibal_current_ability_index)
+            assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned = variables
+
+            self.manage_madness_checkbuttons(daytime, model, tokens, has_ability, pixie_ability_index_learned)
             
             if not self.variable_is_possible(model, game_ended[-1].Not()):
                 self.game_end_sequence(model, daytime, assigned_char, target, learned_char, tokens, is_evil)
@@ -240,9 +246,9 @@ class QuantumClocktower(Tk):
         self.all_night_choices.append(None)
         self.toggle_alignments(set_toggle=False)
         self.execution.set_enabled(True)
-        self.night_control.night_phase = "Day"
-        self.night_and_day_end_common_tasks(False, False)
+        self.night_control.night_phase = f"Day {self.night}"
         self.executed_indexes.append("N/A")
+        self.night_and_day_end_common_tasks(False, False)
     
     def end_day(self):
         setup = self.night_control.night_phase == "Setup"
@@ -253,7 +259,7 @@ class QuantumClocktower(Tk):
         self.all_day_choices.append(None)
         self.toggle_alignments(set_toggle=True)
         self.execution.set_enabled(False)
-        self.night_control.night_phase = "Night"
+        self.night_control.night_phase = f"Night {self.night+1}"
         
         if setup:
             self.end_setup_specific_tasks()
@@ -268,71 +274,91 @@ class QuantumClocktower(Tk):
     
     def manage_madness_checkbuttons(
         self,
+        daytime: bool,
         model: cp_model.CpModel,
         tokens: list[list[list[cp_model.IntVar]]],
         has_ability: list[list[list[cp_model.IntVar]]],
         pixie_ability_index_learned: list[list[cp_model.IntVar]],
-        cannibal_current_ability_index: list[cp_model.IntVar],
     ):
         for checkbutton in self.madness_checkbuttons:
             checkbutton.destroy()
         self.madness_checkbuttons.clear()
         pixie_character_index = [c.name for c in self.character_list].index("pixie")
-        cannibal_character_index = [c.name for c in self.character_list].index("cannibal")
         pixie_known_token_index = [t.name for t in self.token_list].index("pixie_known")
         pixie_has_ability_token_index = [t.name for t in self.token_list].index("pixie_has_ability")
-        cannibal_poisoned_token_index = [t.name for t in self.token_list].index("cannibal_poisoned")
+        barber_swapped_token_condition = [t.name for t in self.token_list].index("pixie_has_ability")
         dead_token_index = [t.name for t in self.token_list].index("dead")
+
+        next_model, next_variables = create_model(self, self.night + daytime, not daytime)
+        _, _, _, next_tokens, _, _, _, _, next_has_ability, next_pixie_ability_index_learned = next_variables
+
+        n = 2*(self.night-1) + daytime
+        most_recent_night = n - daytime
+        
         for i, p in enumerate(self.players):
-            if "pixie" not in [c.name for c in p.possible_characters]:
-                if not {"cannibal", "drunk"} & {c.name for c in p.possible_characters}:
-                    continue
-                if not self.variable_is_possible(model, has_ability[-1][i][pixie_character_index]):
-                    continue
-            p_can_gain_pixie_ability = model.new_bool_var(f"madness_{i}_can_gain_pixie_ability_{...}")
-            pixie_known_player_is_dead = model.new_bool_var(f"madness_{i}_pixie_known_player_was_dead_{...}")
+            if not {"pixie", "cannibal", "drunk"} & {c.name for c in p.possible_characters}:
+                continue
+            # We can't make a checkbutton for a pixie that has not chosen something to be mad as.
+            p_will_have_pixie_ability_and_chosen_character = next_model.new_bool_var(
+                f"{i}_will_have_pixie_ability_and_chosen_character_{n}"
+            )
+            next_model.add_min_equality(
+                p_will_have_pixie_ability_and_chosen_character,
+                [
+                    next_has_ability[n+1][i][pixie_character_index],
+                    next_has_ability[most_recent_night][i][pixie_character_index],
+                ]
+            )
+            # FIXME use possible character
+            if not self.variable_is_possible(next_model, p_will_have_pixie_ability_and_chosen_character):
+                continue
+
+            p_can_gain_learned_ability = next_model.new_bool_var(f"madness_{i}_can_gain_learned_ability_{n}")
+            
+            pixie_known_player_is_dead = next_model.new_bool_var(f"madness_{i}_pixie_known_player_was_dead_{n}")
             causes = []
             for q in range(player_count):
-                q_is_dead_pixie_known = model.new_bool_var(f"madness_{q}_was_dead_pixie_known_{i}_{...}")
-                model.add_min_equality(
+                q_is_dead_pixie_known = next_model.new_bool_var(f"madness_{q}_was_dead_pixie_known_{i}_{n}")
+                next_model.add_min_equality(
                     q_is_dead_pixie_known,
                     [
-                        tokens[-1][q][pixie_known_token_index],
-                        tokens[-1][q][dead_token_index]
+                        next_tokens[n][q][pixie_known_token_index],
+                        next_tokens[n][q][dead_token_index],
                     ]
                 )
                 causes.append(q_is_dead_pixie_known)
-            model.add_max_equality(pixie_known_player_is_dead, causes)
-            model.add_min_equality(
-                p_can_gain_pixie_ability,
+            next_model.add_max_equality(pixie_known_player_is_dead, causes)
+            
+            next_model.add_min_equality(
+                p_can_gain_learned_ability,
                 [
-                    tokens[-1][i][pixie_has_ability_token_index].Not(),
-                    pixie_known_player_is_dead.Not()
+                    next_tokens[n][i][pixie_has_ability_token_index].Not(),
+                    pixie_known_player_is_dead.Not(),
                 ]
             )
                 
             solver = cp_model.CpSolver()
             set_solver_parameters(solver)
-            model.add_assumption(p_can_gain_pixie_ability)
-            if solver.solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-                mad_char_index = solver.value(pixie_ability_index_learned[-1][i])
+            next_model.add_assumptions([p_can_gain_learned_ability, p_will_have_pixie_ability_and_chosen_character])
+            if solver.solve(next_model) in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                mad_char_index = solver.value(next_pixie_ability_index_learned[n][i])
                 madness_checkbutton = Checkbutton(
                     self,
                     text=f"{p.name} is mad as {self.character_list[mad_char_index].name.title()}",
-                    variable=self.all_madness[-1][i],
+                    variable=self.all_madness[n+1][i],
                 )
                 madness_checkbutton.pack(side="bottom", anchor="se")
                 self.madness_checkbuttons.append(madness_checkbutton)
-                self.all_mad_char_indexes[-1][i] = mad_char_index
-                self.all_madness[-1][i].set(self.all_madness[-2][i].get())  # keeps checkbutton checked. may have weird interactions
-            model.clear_assumptions()
+                self.all_mad_char_indexes[n+1][i] = mad_char_index
+                self.all_madness[n+1][i].set(self.all_madness[n][i].get())  # keeps checkbutton checked. may have weird interactions
+            next_model.clear_assumptions()
     
     def determine_possible_variables(self, daytime_override: bool | None = None):
         if daytime_override is None:
-            daytime = self.night_control.night_phase == "Day"
+            daytime = self.daytime
         else:
             daytime = daytime_override
-        model, (assigned_char, _, _, tokens, is_evil, _, _, game_ended, _, _, _) = create_model(self, self.night, daytime)
+        model, (assigned_char, _, _, tokens, is_evil, _, _, game_ended, _, _) = create_model(self, self.night, daytime)
         model.add(game_ended[-1] == 0) # TODO change? (alongside other constraint)
         
         if daytime:

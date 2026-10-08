@@ -529,7 +529,6 @@ def clockmaker_number_learned(**kwargs):
     ]
     
     learned_number = model.new_int_var(-1, len(player_list), f"clockmaker_learned_number_{player_index}_{n}")
-    model.add(learned_number != 0)
     clockmaker_number = model.new_int_var(1, len(player_list), f"clockmaker_number_{player_index}_{n}")
     distances = []
     for p in range(len(player_list)):
@@ -566,10 +565,8 @@ def clockmaker_number_learned(**kwargs):
             ).only_enforce_if(p_demon_and_q_minion)
             model.add(p_q_distance == len(player_list)).only_enforce_if(p_demon_and_q_minion.Not())
             distances.append(p_q_distance)
-    model.add_min_equality(
-        clockmaker_number,
-        distances
-    )
+    model.add_min_equality(clockmaker_number, distances)
+    
     healthy_new_instance = model.new_bool_var(f"clockmaker_number_learned_healthy_new_instance_{player_index}_{n}")
     model.add_min_equality(
         healthy_new_instance,
@@ -784,10 +781,10 @@ full_sized_char_list = [
     Character("lleech", "evil", "demon", True, -1, -1),
     Character("vortox", "evil", "demon", lambda **kwargs: kwargs["n"] > 0, -1, -1),
 ]
-full_sized_night_order = [] # TODO for barber?
-# full_sized_char_list = [
-#     x[0] for x in sorted(zip(full_sized_char_list, full_sized_night_order), key=lambda x: x[1])
-# ]
+full_sized_night_order = [11, 8, 9, 12, 10, 1, 2, 4, 999, 999, 999, 999, 999, 999, 999, 999, 999, 0, 3, 999, 999, 5, 7, 6]
+full_sized_char_list = [
+    x[0] for x in sorted(zip(full_sized_char_list, full_sized_night_order), key=lambda x: x[1])
+]
 
 
 teensy_char_list = [
@@ -810,9 +807,9 @@ teensy_char_list = [
     x[0] for x in sorted(zip(teensy_char_list, teensy_night_order), key=lambda x: x[1])
 ]
 
-# TODO: think about this
-# NOTE: if droisoned and an in-play character is learned the token is applied correctly to avoid duplicate abilities
-def add_pixie_known_token_condition( # NOTE: also forces pixie known char to not be in play if vortoxed
+# NOTE: also forces pixie known char to not be in play if vortoxed
+# NOTE: the token is ALWAYS applied to and stays on the learned character if in play to avoid duplicate abilities.
+def add_pixie_known_token_condition( # FIXME do duplicate town abilities matter?
     model: cp_model.CpModel,
     player_list: list[Player],
     token_list: list[Token],
@@ -822,101 +819,41 @@ def add_pixie_known_token_condition( # NOTE: also forces pixie known char to not
 ):
     character_list: list[Character] = kwargs["character_list"]
     assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
-    learned_char: list[list[list[cp_model.IntVar]]] = kwargs["learned_char"]
     droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
     vortoxed: list[list[cp_model.IntVar]] = kwargs["vortoxed"]
+    pixie_ability_index_learned: list[list[cp_model.IntVar]] = kwargs["pixie_ability_index_learned"]
     character_index = [c.name for c in character_list].index("pixie")
     token_index = [t.name for t in token_list].index("pixie_known")
-    new_instance_token_index = [t.name for t in token_list].index("new_instance")
     
-    new_pixie_exists = model.new_bool_var(f"new_pixie_exists_{n}")
-    old_pixie_exists = model.new_bool_var(f"old_pixie_exists_{n}")
-    new_pixie_matches = []
-    old_pixie_matches = []
-    for p in range(len(player_list)):
-        new_pixie_m = model.new_bool_var(f"{p}_is_new_pixie_{n}")
-        model.add_min_equality(
-            new_pixie_m,
-            [
-                assigned_char[n][p][character_index],
-                tokens[n][p][new_instance_token_index]
-            ]
-        )
-        old_pixie_m = model.new_bool_var(f"{p}_is_old_pixie_{n}")
-        model.add_min_equality(
-            old_pixie_m,
-            [
-                assigned_char[n][p][character_index],
-                tokens[n][p][new_instance_token_index].Not()
-            ]
-        )
-        new_pixie_matches.append(new_pixie_m)
-        old_pixie_matches.append(old_pixie_m)
-    model.add_max_equality(new_pixie_exists, new_pixie_matches)
-    model.add_max_equality(old_pixie_exists, old_pixie_matches)
-    model.add_max_equality(
+    model.add(
         sum(
             tokens[n][p][token_index]
             for p in range(len(player_list))
-        ),
-        [
-            new_pixie_exists,
-            old_pixie_exists
-        ]
-    )
-    retain_token(
-        model,
-        player_list,
-        tokens,
-        n,
-        token_index,
-        old_pixie_exists
+        ) == sum(
+            assigned_char[n][p][character_index]
+            for p in range(len(player_list))
+        )
     )
     
     for p in range(len(player_list)):
         causes = []
         for q in range(len(player_list)):
             cause = model.new_bool_var(f"{p}_given_pixie_known_token_by_{q}_{n}")
-            p_has_q_learned_char = model.new_bool_var(f"{p}_has_{q}_learned_char")
-            matches = []
-            for i, (a, l) in enumerate(zip(assigned_char[n][p], learned_char[n][q])):
-                m = model.new_bool_var(f"pixie_known_{p}_{q}_{i}_match")
-                model.add_min_equality(m, [a, l])
-                matches.append(m)
-            model.add_max_equality(p_has_q_learned_char, matches)
+            p_has_pixie_q_learned_char = model.new_bool_var(f"{p}_has_pixie_{q}_learned_character_{n}")
+            model.add_element(
+                pixie_ability_index_learned[n][q], assigned_char[n][p], p_has_pixie_q_learned_char
+            ).only_enforce_if(assigned_char[n][q][character_index])
+            model.add_implication(assigned_char[n][q][character_index].Not(), p_has_pixie_q_learned_char.Not())
             
-            q_is_healthy = model.new_bool_var(f"pixie_known_{q}_is_healthy_{p}_{n}")
-            model.add_min_equality(
-                q_is_healthy,
-                [
-                    droisoned[n][q].Not(),
-                    vortoxed[n][q].Not()
-                ]
-            )
-            
-            model.add_implication(
-                assigned_char[n][q][character_index].Not(),
-                cause.Not()
-            )
-            
-            model.add_min_equality(
-                cause,
-                [
-                    assigned_char[n][q][character_index],
-                    p_has_q_learned_char
-                ]
-            ).only_enforce_if(q_is_healthy)
-                
-            model.add_bool_or(
-                p_has_q_learned_char.Not(),
-                assigned_char[n][q][character_index].Not(),
-                vortoxed[n][q].Not()
-            )
+            model.add_implication(p_has_pixie_q_learned_char, cause)
+            model.add_bool_or(cause.Not(), p_has_pixie_q_learned_char, droisoned[n][q], vortoxed[n][q])
+            model.add_implication(vortoxed[n][q], p_has_pixie_q_learned_char.Not())
+            model.add_implication(assigned_char[n][q][character_index].Not(), cause.Not())
 
             causes.append(cause)
         model.add_max_equality(tokens[n][p][token_index], causes)
 
-
+# FIXME
 def add_pixie_has_ability_token_condition(
     model: cp_model.CpModel,
     player_list: list[Player],
@@ -938,6 +875,81 @@ def add_pixie_has_ability_token_condition(
         for p in range(len(player_list)):
             model.add(tokens[n][p][token_index] == 0)
         return
+
+    for p in range(len(player_list)):
+        p_character_learned_goes_after_kills = model.new_bool_var(f"pixie_{p}_character_learned_goes_after_kills_{n}")
+        if n % 2:
+            model.add(p_character_learned_goes_after_kills == 0)
+        if not n % 2:
+            model.add(
+                pixie_ability_index_learned[n][p] > [c.name for c in character_list].index("lleech")
+            ).only_enforce_if(p_character_learned_goes_after_kills)
+            model.add(
+                pixie_ability_index_learned[n][p] <= [c.name for c in character_list].index("lleech")
+            ).only_enforce_if(p_character_learned_goes_after_kills.Not())
+        
+        p_gains_ability_now = model.new_bool_var(f"{p}_gains_pixie_ability_now_{n}")
+        p_is_mad = model.new_bool_var(f"pixie_has_ability_{p}_is_mad_{n}")
+        model.add_element(pixie_ability_index_learned[n][p], mad_char[n][p], 1).only_enforce_if(p_is_mad)
+        model.add_element(pixie_ability_index_learned[n][p], mad_char[n][p], 0).only_enforce_if(p_is_mad.Not())
+        now_causes = []
+        for q in range(len(player_list)):
+            p_gains_q_ability_now = model.new_bool_var(f"{p}_gains_{q}_ability_now_{n}")
+            model.add_min_equality(
+                p_gains_q_ability_now,
+                [
+                    assigned_char[n][p][character_index],
+                    p_is_mad,
+                    p_character_learned_goes_after_kills,
+                    tokens[n][q][pixie_known_token_index],
+                    tokens[n][q][dead_token_index],
+                ]
+            )
+            now_causes.append(p_gains_q_ability_now)
+        model.add_max_equality(p_gains_ability_now, now_causes)
+        
+        p_gains_ability_from_last_n = model.new_bool_var(f"{p}_gains_pixie_ability_from_last_n_{n}")
+        p_was_mad = model.new_bool_var(f"pixie_has_ability_{p}_was_mad_{n}")
+        model.add_element(pixie_ability_index_learned[n-1][p], mad_char[n-1][p], 1).only_enforce_if(p_was_mad)
+        model.add_element(pixie_ability_index_learned[n-1][p], mad_char[n-1][p], 0).only_enforce_if(p_was_mad.Not())
+        last_causes = []
+        for q in range(len(player_list)):
+            p_gains_q_ability_from_last_n = model.new_bool_var(f"{p}_gains_{q}_ability_from_last_n_{n}")
+            model.add_min_equality(
+                p_gains_q_ability_now,
+                [
+                    assigned_char[n-1][p][character_index],
+                    assigned_char[n][p][character_index],
+                    p_was_mad,
+                    tokens[n-1][q][pixie_known_token_index],
+                    tokens[n-1][q][dead_token_index],
+                ]
+            )
+            last_causes.append(p_gains_q_ability_from_last_n)
+        model.add_max_equality(p_gains_ability_from_last_n, p_gains_q_ability_from_last_n)
+        
+        p_already_has_ability = model.new_bool_var(f"{p}_already_has_pixie_ability_{n}")
+        model.add_min_equality(
+            p_already_has_ability,
+            [
+                tokens[n-1][p][token_index],
+                assigned_char[n][p][character_index],
+            ]
+        )
+        model.add_max_equality(
+            tokens[n][p][token_index],
+            [
+                p_gains_ability_now,
+                p_gains_ability_from_last_n,
+                p_already_has_ability,
+            ]
+        )
+            
+            
+        
+        
+
+
 
     for p in range(len(player_list)):
         p_was_mad = model.new_bool_var(f"pixie_has_ability_{p}_was_mad_as_learned_char_{n}")
