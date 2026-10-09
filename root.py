@@ -227,7 +227,7 @@ class QuantumClocktower(Tk):
             model, variables = create_model(self, self.night, daytime)
             assigned_char, target, learned_char, tokens, is_evil, good_wins, evil_wins, game_ended, has_ability, pixie_ability_index_learned = variables
 
-            self.manage_madness_checkbuttons(daytime, model, tokens, has_ability, pixie_ability_index_learned)
+            self.manage_madness_checkbuttons(daytime)
             
             if not self.variable_is_possible(model, game_ended[-1].Not()):
                 self.game_end_sequence(model, daytime, assigned_char, target, learned_char, tokens, is_evil)
@@ -275,10 +275,6 @@ class QuantumClocktower(Tk):
     def manage_madness_checkbuttons(
         self,
         daytime: bool,
-        model: cp_model.CpModel,
-        tokens: list[list[list[cp_model.IntVar]]],
-        has_ability: list[list[list[cp_model.IntVar]]],
-        pixie_ability_index_learned: list[list[cp_model.IntVar]],
     ):
         for checkbutton in self.madness_checkbuttons:
             checkbutton.destroy()
@@ -286,44 +282,49 @@ class QuantumClocktower(Tk):
         pixie_character_index = [c.name for c in self.character_list].index("pixie")
         pixie_known_token_index = [t.name for t in self.token_list].index("pixie_known")
         pixie_has_ability_token_index = [t.name for t in self.token_list].index("pixie_has_ability")
-        barber_swapped_token_condition = [t.name for t in self.token_list].index("pixie_has_ability")
         dead_token_index = [t.name for t in self.token_list].index("dead")
 
         next_model, next_variables = create_model(self, self.night + daytime, not daytime)
         _, _, _, next_tokens, _, _, _, _, next_has_ability, next_pixie_ability_index_learned = next_variables
 
-        n = 2*(self.night-1) + daytime
-        most_recent_night = n - daytime
+        now = 2*(self.night-1) + daytime
+        most_recent_night = now - daytime
         
         for i, p in enumerate(self.players):
             if not {"pixie", "cannibal", "drunk"} & {c.name for c in p.possible_characters}:
                 continue
+            for n in range(0, now+1, 2):
+                chosen_player = self.all_night_choices[n][i][0]
+                character_index_learned = self.all_night_choices[n][i][1]
+                if chosen_player is None and character_index_learned is not None:
+                    break
+            else:
+                continue
             # We can't make a checkbutton for a pixie that has not chosen something to be mad as.
             p_will_have_pixie_ability_and_chosen_character = next_model.new_bool_var(
-                f"{i}_will_have_pixie_ability_and_chosen_character_{n}"
+                f"{i}_will_have_pixie_ability_and_chosen_character_{now}"
             )
             next_model.add_min_equality(
                 p_will_have_pixie_ability_and_chosen_character,
                 [
-                    next_has_ability[n+1][i][pixie_character_index],
+                    next_has_ability[now+1][i][pixie_character_index],
                     next_has_ability[most_recent_night][i][pixie_character_index],
                 ]
             )
-            # FIXME use possible character
             if not self.variable_is_possible(next_model, p_will_have_pixie_ability_and_chosen_character):
                 continue
 
-            p_can_gain_learned_ability = next_model.new_bool_var(f"madness_{i}_can_gain_learned_ability_{n}")
+            p_can_gain_learned_ability = next_model.new_bool_var(f"madness_{i}_can_gain_learned_ability_{now}")
             
-            pixie_known_player_is_dead = next_model.new_bool_var(f"madness_{i}_pixie_known_player_was_dead_{n}")
+            pixie_known_player_is_dead = next_model.new_bool_var(f"madness_{i}_pixie_known_player_was_dead_{now}")
             causes = []
             for q in range(player_count):
-                q_is_dead_pixie_known = next_model.new_bool_var(f"madness_{q}_was_dead_pixie_known_{i}_{n}")
+                q_is_dead_pixie_known = next_model.new_bool_var(f"madness_{q}_was_dead_pixie_known_{i}_{now}")
                 next_model.add_min_equality(
                     q_is_dead_pixie_known,
                     [
-                        next_tokens[n][q][pixie_known_token_index],
-                        next_tokens[n][q][dead_token_index],
+                        next_tokens[now][q][pixie_known_token_index],
+                        next_tokens[now][q][dead_token_index],
                     ]
                 )
                 causes.append(q_is_dead_pixie_known)
@@ -332,7 +333,7 @@ class QuantumClocktower(Tk):
             next_model.add_min_equality(
                 p_can_gain_learned_ability,
                 [
-                    next_tokens[n][i][pixie_has_ability_token_index].Not(),
+                    next_tokens[now][i][pixie_has_ability_token_index].Not(),
                     pixie_known_player_is_dead.Not(),
                 ]
             )
@@ -341,16 +342,16 @@ class QuantumClocktower(Tk):
             set_solver_parameters(solver)
             next_model.add_assumptions([p_can_gain_learned_ability, p_will_have_pixie_ability_and_chosen_character])
             if solver.solve(next_model) in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-                mad_char_index = solver.value(next_pixie_ability_index_learned[n][i])
+                mad_char_index = solver.value(next_pixie_ability_index_learned[now][i])
                 madness_checkbutton = Checkbutton(
                     self,
                     text=f"{p.name} is mad as {self.character_list[mad_char_index].name.title()}",
-                    variable=self.all_madness[n+1][i],
+                    variable=self.all_madness[now+1][i],
                 )
                 madness_checkbutton.pack(side="bottom", anchor="se")
                 self.madness_checkbuttons.append(madness_checkbutton)
-                self.all_mad_char_indexes[n+1][i] = mad_char_index
-                self.all_madness[n+1][i].set(self.all_madness[n][i].get())  # keeps checkbutton checked. may have weird interactions
+                self.all_mad_char_indexes[now+1][i] = mad_char_index
+                self.all_madness[now+1][i].set(self.all_madness[now][i].get())  # keeps checkbutton checked. may have weird interactions
             next_model.clear_assumptions()
     
     def determine_possible_variables(self, daytime_override: bool | None = None):

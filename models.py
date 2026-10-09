@@ -807,6 +807,7 @@ def set_character_learned_info(
             else:
                 c_char_index_learned: cp_model.IntVar = c.char_index_learned(
                     model=model,
+                    player_list=clocktower.players,
                     character_list=clocktower.character_list,
                     assigned_char=assigned_char,
                     learned_char=learned_char,

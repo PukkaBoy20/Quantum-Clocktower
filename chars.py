@@ -718,20 +718,40 @@ def mathematician_number_learned(**kwargs): # TODO: double check this works afte
 
 def undertaker_character_index_learned(**kwargs):
     model: cp_model.CpModel = kwargs["model"]
+    player_list: list[Player] = kwargs["player_list"]
     character_list: list[Character] = kwargs["character_list"]
     assigned_char: list[list[list[cp_model.IntVar]]] = kwargs["assigned_char"]
+    tokens: list[list[list[cp_model.IntVar]]] = kwargs["tokens"]
+    token_list: list[Token] = kwargs["token_list"]
     executed_indexes: list[int | str | None] = kwargs["executed_indexes"]
     droisoned: list[list[cp_model.IntVar]] = kwargs["droisoned"]
     vortoxed: list[list[cp_model.IntVar]] = kwargs["vortoxed"]
     n: int = kwargs["n"]
     player_index: int = kwargs["player_index"]
+    dead_token_index = [c.name for c in token_list].index("dead")
     
     if n == 0 or executed_indexes[n-1] is None:
         return -1
 
-    undertaker_char_index = model.new_int_var(0, len(character_list)-1, f"undertaker_char_index_{player_index}_{n}")
+    undertaker_char_learned_index = model.new_int_var(-1, len(character_list)-1, f"undertaker_char_index_{player_index}_{n}")
+    execution_death_occurred = model.new_bool_var(f"undertaker_execution_death_occurred_{n}")
+    model.add(
+        sum(
+            [
+                tokens[n][p][dead_token_index]
+                for p in range(len(player_list))
+            ]
+        ) == sum(
+            [
+                tokens[n-1][p][dead_token_index]
+                for p in range(len(player_list))
+            ]
+        ) + execution_death_occurred
+    )
     for i, char_bool in enumerate(assigned_char[n-1][executed_indexes[n-1]]):
-        model.add(undertaker_char_index == i).only_enforce_if(char_bool)
+        model.add(undertaker_char_learned_index == i).only_enforce_if(char_bool, execution_death_occurred)
+    model.add(undertaker_char_learned_index == -1).only_enforce_if(execution_death_occurred.Not())
+    
     healthy = model.new_bool_var(f"undertaker_character_learned_healthy_{player_index}_{n}")
     model.add_min_equality(
         healthy,
@@ -740,9 +760,12 @@ def undertaker_character_index_learned(**kwargs):
             vortoxed[n][player_index].Not()
         ]
     )
-    char_index_learned = model.new_int_var(0, len(character_list)-1, f"undertaker_char_index_learned_{player_index}_{n}")
-    model.add(char_index_learned == undertaker_char_index).only_enforce_if(healthy)
-    model.add(char_index_learned != undertaker_char_index).only_enforce_if(vortoxed[n][player_index])
+    char_index_learned = model.new_int_var(-1, len(character_list)-1, f"undertaker_char_index_learned_{player_index}_{n}")
+    model.add(char_index_learned == -1).only_enforce_if(execution_death_occurred.Not())
+    model.add(char_index_learned == undertaker_char_learned_index).only_enforce_if(healthy)
+    model.add(char_index_learned != undertaker_char_learned_index).only_enforce_if(
+        vortoxed[n][player_index], execution_death_occurred
+    )
     return char_index_learned
 
 def gambler_character_index_learned(**kwargs):
@@ -1065,7 +1088,7 @@ def add_fool_protected_token_condition(
                 droisoned[n][p].Not()
             ]
         )
-
+# FIXME tea lady granting protection when it shouldn't?
 # FIXME fix interaction when multiple deaths happen next to a tea lady in one night
 def add_tea_lady_protected_token_condition(
     model: cp_model.CpModel,
