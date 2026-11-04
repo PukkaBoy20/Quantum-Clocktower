@@ -49,7 +49,7 @@ def create_model(
     registers_as_evil: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
     remembered_tokens: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)] # mainly used for stuff like faux paw
     mad_char: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)]
-    abnormal_ability: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)] # for mathematician
+    abnormal_ability: list[list[list[cp_model.IntVar]]] = [[] for _ in range(now+1)] # for mathematician
     barber_swap_indexes: list[list[tuple[cp_model.IntVar]]] = [[] for _ in range(now+1)]
     droisoned: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
     vortoxed: list[list[cp_model.IntVar]] = [[] for _ in range(now+1)]
@@ -73,6 +73,7 @@ def create_model(
             tokens[n].append([])
             remembered_tokens[n].append([])
             mad_char[n].append([])
+            abnormal_ability[n].append([])
             puzzlemaster_guess[n].append([])
             puzzlemaster_demon_learned[n].append([])
             damsel_guess[n].append([])
@@ -81,6 +82,7 @@ def create_model(
                 assigned_char[n][p].append(model.new_bool_var(f"assigned_char_{n}_{p}_{c}"))
                 learned_char[n][p].append(model.new_bool_var(f"character_learned_{n}_{p}_{c}"))
                 mad_char[n][p].append(model.new_bool_var(f"mad_char_{n}_{p}_{c}"))
+                abnormal_ability[n][p].append(model.new_bool_var(f"abnormal_ability_{n}_{p}_{c}"))
                 has_ability[n][p].append(model.new_bool_var(f"has_ability_{n}_{p}_{c}"))
             for q in range(player_count):
                 target[n][p].append(model.new_bool_var(f"target_{n}_{p}_{q}"))
@@ -91,7 +93,6 @@ def create_model(
                 tokens[n][p].append(model.new_bool_var(f"token_{n}_{p}_{t}"))
                 remembered_tokens[n][p].append(model.new_bool_var(f"remembered_token_{n}_{p}_{t}"))
             num_learned[n].append(model.new_int_var(-1, player_count, f"num_learned_{n}_{p}"))
-            abnormal_ability[n].append(model.new_bool_var(f"abnormal_ability_{n}_{p}"))
             droisoned[n].append(model.new_bool_var(f"{p}_is_droisoned_{n}"))
             vortoxed[n].append(model.new_bool_var(f"{p}_is_vortoxed_{n}"))
             barber_swap_indexes[n].append(
@@ -102,7 +103,7 @@ def create_model(
             )
             damsel_guess_order[n].append(model.new_int_var(0, player_count-1, f"damsel_guess_order_{n}_{p}"))
             pixie_ability_index_learned[n].append(
-                model.new_int_var(0, len(clocktower.character_list)-1, f"pixie_ability_index_learned_{n}_{p}")
+                model.new_int_var(-1, len(clocktower.character_list)-1, f"pixie_ability_index_learned_{n}_{p}")
             )
             
         set_is_evil(clocktower, model, player_count, assigned_char, tokens, is_evil, n)
@@ -117,7 +118,7 @@ def create_model(
                 registers_as_evil[n][p],
                 [is_evil[n][p]]
                 + [
-                    tokens[n][q][t]
+                    tokens[n][p][t]
                     for t in evil_registration_token_indexes
                 ]
             )
@@ -439,20 +440,24 @@ def set_pixie_ability_index_learned(
     pixie_ability_index_learned: list[list[cp_model.IntVar]],
     n: int,
 ):
+    pixie_character_index = [c.name for c in clocktower.character_list].index("pixie")
+    new_instance_token_index = [t.name for t in clocktower.token_list].index("new_instance")
+    
     for p in range(len(clocktower.players)):
-        pixie_character_index = [c.name for c in clocktower.character_list].index("pixie")
-        new_instance_token_index = [t.name for t in clocktower.token_list].index("new_instance")
         for i, learned_char_bool in enumerate(learned_char[n][p]):
             model.add(pixie_ability_index_learned[n][p] == i).only_enforce_if(
-                    learned_char_bool,
-                    assigned_char[n][p][pixie_character_index],
-                    tokens[n][p][new_instance_token_index]
-                )
+                learned_char_bool,
+                assigned_char[n][p][pixie_character_index],
+                tokens[n][p][new_instance_token_index],
+            )
+        # model.add(pixie_ability_index_learned[n][p] == -1).only_enforce_if(
+        #     assigned_char[n][p][pixie_character_index].Not(),
+        # )
         if n > 0:
             model.add(pixie_ability_index_learned[n][p] == pixie_ability_index_learned[n-1][p]).only_enforce_if(
-                    assigned_char[n][p][pixie_character_index],
-                    tokens[n][p][new_instance_token_index].Not()
-                )
+                assigned_char[n][p][pixie_character_index],
+                tokens[n][p][new_instance_token_index].Not(),
+            )
 
 
 
@@ -739,7 +744,7 @@ def set_number_learned_info(
     tokens: list[list[list[cp_model.IntVar]]],
     is_evil: list[list[cp_model.IntVar]],
     registers_as_evil: list[list[cp_model.IntVar]],
-    abnormal_ability: list[list[cp_model.IntVar]],
+    abnormal_ability: list[list[list[cp_model.IntVar]]],
     droisoned: list[list[cp_model.IntVar]],
     vortoxed: list[list[cp_model.IntVar]],
     has_ability: list[list[list[cp_model.IntVar]]],
@@ -776,6 +781,22 @@ def set_number_learned_info(
             model.add(number_learned_due_to_ability == c_number_learned).only_enforce_if(has_ability[n][p][j])
             model.add(number_learned_due_to_ability == -1).only_enforce_if(has_ability[n][p][j].Not())
             numbers.append(number_learned_due_to_ability)
+            
+            # p_ability_c_malfunctioned = model.new_bool_var(f"{p}_ability_{j}_malfunctioned_{n}")
+            # p_learned_true_number = model.new_bool_var(f"{p}_learned_true_number_{n}")
+            # model.add(c_number_learned == true_number).only_enforce_if(p_learned_true_number)
+            # model.add(c_number_learned != true_number).only_enforce_if(p_learned_true_number.Not())
+            
+            # # ability malfunctioned iff has_ability[n][p][j] AND c_number_learned != true number
+            # model.add_min_equality(
+            #     p_ability_c_malfunctioned,
+            #     [
+                    
+            #     ]
+            # )
+            
+            
+            # abnormal_ability[n][p].append(p_ability_c_malfunctioned)
         model.add_max_equality(num_learned[n][p], numbers)
         
 
